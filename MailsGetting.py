@@ -21,7 +21,7 @@ HEADERS_BASE = {
 MAX_TRIES = 3
 RAW_LOG_LEN = 800
 DEFAULT_PROVIDERS = ["mailtm", "1secmail", "getnada", "maildrop", "mailsac"]
-MAX_HISTORY = 10  # максимум почт на пользователя
+MAX_HISTORY = 10
 
 # -------------------- Base provider --------------------
 class BaseProvider:
@@ -39,9 +39,6 @@ class BaseProvider:
     async def read_message(self, email=None, token=None, msg_id=None):
         raise NotImplementedError
 
-    async def delete_message(self, email=None, token=None, msg_id=None):
-        raise NotImplementedError
-
     async def delete_account(self, email=None, token=None):
         raise NotImplementedError
 
@@ -56,8 +53,7 @@ class BaseProvider:
             try:
                 async with self.session.get(url, timeout=timeout) as resp:
                     text = await resp.text(errors="ignore")
-                    ct = resp.headers.get("Content-Type", "")
-                    return resp.status, ct, text
+                    return resp.status, resp.headers.get("Content-Type", ""), text
             except Exception as e:
                 last = e
                 await asyncio.sleep(0.5 * attempt)
@@ -69,8 +65,7 @@ class BaseProvider:
             try:
                 async with self.session.post(url, json=json_data, headers=headers, timeout=timeout) as resp:
                     text = await resp.text(errors="ignore")
-                    ct = resp.headers.get("Content-Type", "")
-                    return resp.status, ct, text
+                    return resp.status, resp.headers.get("Content-Type", ""), text
             except Exception as e:
                 last = e
                 await asyncio.sleep(0.5 * attempt)
@@ -112,21 +107,16 @@ class MailTmProvider(BaseProvider):
             async with s.get(f"{self.base}/messages/{msg_id}") as resp:
                 return await resp.json()
 
-    async def delete_message(self, email=None, token=None, msg_id=None):
-        headers = await self._auth_headers(token)
-        async with aiohttp.ClientSession(headers={**HEADERS_BASE, **headers}) as s:
-            async with s.delete(f"{self.base}/messages/{msg_id}") as resp:
-                if resp.status not in (200,204):
-                    raise RuntimeError(f"mail.tm delete HTTP {resp.status}")
-
     async def delete_account(self, email=None, token=None):
-        headers = await self._auth_headers(token)
-        async with aiohttp.ClientSession(headers={**HEADERS_BASE, **headers}) as s:
-            async with s.delete(f"{self.base}/me") as resp:
-                if resp.status not in (200,204):
-                    raise RuntimeError("mail.tm delete failed")
+        try:
+            headers = await self._auth_headers(token)
+            async with aiohttp.ClientSession(headers={**HEADERS_BASE, **headers}) as s:
+                async with s.delete(f"{self.base}/me") as resp:
+                    pass
+        except:
+            pass  # игнорируем ошибки, чтобы модуль не падал
 
-# 1secmail
+# -------------------- Other providers --------------------
 class OneSecMailProvider(BaseProvider):
     name = "1secmail"
     base = "https://www.1secmail.com/api/v1/"
@@ -138,38 +128,31 @@ class OneSecMailProvider(BaseProvider):
 
     async def list_messages(self, email=None, token=None):
         login, domain = email.split("@")
-        url = f"{self.base}?action=getMessages&login={login}&domain={domain}"
-        stat, ct, text = await self._get(url)
+        stat, ct, text = await self._get(f"{self.base}?action=getMessages&login={login}&domain={domain}")
         return json.loads(text)
 
     async def read_message(self, email=None, msg_id=None, token=None):
         login, domain = email.split("@")
-        url = f"{self.base}?action=readMessage&login={login}&domain={domain}&id={msg_id}"
-        stat, ct, text = await self._get(url)
+        stat, ct, text = await self._get(f"{self.base}?action=readMessage&login={login}&domain={domain}&id={msg_id}")
         return json.loads(text)
 
-# GetNada
 class GetNadaProvider(BaseProvider):
     name = "getnada"
     base = "https://getnada.com/api/v1"
 
     async def create_address(self):
         prefix = "hikka" + "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
-        domain = "getnada.com"
-        return {"email": f"{prefix}@{domain}", "provider": self.name}
+        return {"email": f"{prefix}@getnada.com", "provider": self.name}
 
     async def list_messages(self, email=None, token=None):
-        url = f"{self.base}/inboxes/{email}"
-        stat, ct, text = await self._get(url)
+        stat, ct, text = await self._get(f"{self.base}/inboxes/{email}")
         data = json.loads(text)
         return data.get("msgs", [])
 
     async def read_message(self, email=None, msg_id=None, token=None):
-        url = f"{self.base}/messages/{msg_id}"
-        stat, ct, text = await self._get(url)
+        stat, ct, text = await self._get(f"{self.base}/messages/{msg_id}")
         return json.loads(text)
 
-# Maildrop
 class MaildropProvider(BaseProvider):
     name = "maildrop"
     base = "https://api.maildrop.cc/graphql"
@@ -192,7 +175,6 @@ class MaildropProvider(BaseProvider):
         data = json.loads(text)
         return data.get("data", {}).get("message", {})
 
-# Mailsac
 class MailsacProvider(BaseProvider):
     name = "mailsac"
     base = "https://mailsac.com/api"
@@ -202,13 +184,11 @@ class MailsacProvider(BaseProvider):
         return {"email": f"{prefix}@mailsac.com", "provider": self.name}
 
     async def list_messages(self, email=None, token=None):
-        url = f"{self.base}/addresses/{email}/messages"
-        stat, ct, text = await self._get(url)
+        stat, ct, text = await self._get(f"{self.base}/addresses/{email}/messages")
         return json.loads(text)
 
     async def read_message(self, email=None, msg_id=None, token=None):
-        url = f"{self.base}/text/{email}/{msg_id}"
-        stat, ct, text = await self._get(url)
+        stat, ct, text = await self._get(f"{self.base}/text/{email}/{msg_id}")
         return {"body": text}
 
 # -------------------- Hikka module --------------------
@@ -224,14 +204,12 @@ class TempMailModule(loader.Module):
         "inbox": "📥 <b>Входящие ({})</b>:\n{}",
         "read_usage": "❌ <b>Используй:</b> <code>.tread &lt;id&gt; [email]</code>",
         "letter": "📩 <b>Письмо</b>\n\n<b>От:</b> <code>{}</code>\n<b>Тема:</b> <code>{}</code>\n\n{}",
-        "api_error": "⚠️ <b>Ошибка API</b>\nПровайдер: {} \nПричина: {}",
-        "trying": "⏳ Пробую провайдера: {}...",
         "provider_set": "✅ <b>Провайдер установлен:</b> {}",
         "info": "📌 <b>Активный Email:</b> <code>{}</code>\n<b>Провайдер:</b> {}",
-        "unknown_provider": "❌ Неизвестный провайдер. Доступные: {}",
         "deleted": "🗑️ Почта удалена: {} (провайдер: {})",
         "mails_list": "📜 <b>Твои адреса:</b>\n{}",
         "set_active": "✅ Активный адрес: <code>{}</code>",
+        "api_error": "⚠️ <b>Ошибка API</b>\nПровайдер: {} \nПричина: {}",
     }
 
     def __init__(self):
@@ -249,27 +227,31 @@ class TempMailModule(loader.Module):
         self.db = db
         self._client = client
 
-    # ---------- helpers ----------
+    # ---------- storage helpers ----------
     def _addr_key(self, uid): return f"addrs_{uid}"
     def _active_key(self, uid): return f"addr_{uid}"
     def _prov_key(self, uid): return f"prov_{uid}"
     def _get_history(self, uid): return self.db.get(self.name, self._addr_key(uid), [])
     def _save_history(self, uid, history): self.db.set(self.name, self._addr_key(uid), history[:MAX_HISTORY])
+
     def _get_active_record(self, uid):
         active = self.db.get(self.name, self._active_key(uid))
         if not active: return None
         history = self._get_history(uid)
         for rec in history:
-            if rec.get("email") == active: return rec
+            if rec.get("email") == active:
+                return rec
         return None
+
     def _add_record(self, uid, record):
         history = self._get_history(uid)
         history.insert(0, record)
         if len(history) > MAX_HISTORY: history = history[:MAX_HISTORY]
         self._save_history(uid, history)
         self.db.set(self.name, self._active_key(uid), record["email"])
+
     def _prov_by_name(self, name): return self.providers.get(name)
-    def _get_user_provider_name(self, uid): return self.db.get(self.name, self._prov_key(uid), self.provider_order[0])
+
     def _format_inbox_items(self, provider_name, raw_items):
         out = []
         for r in raw_items:
@@ -282,24 +264,14 @@ class TempMailModule(loader.Module):
 
     # ---------------- Commands ----------------
     @loader.command()
-    async def tprovider(self, message):
-        args = utils.get_args_raw(message).split()
-        if not args:
-            return await utils.answer(message, self.strings["unknown_provider"].format(", ".join(self.providers.keys())))
-        p = args[0].lower()
-        if p not in self.providers:
-            return await utils.answer(message, self.strings["unknown_provider"].format(", ".join(self.providers.keys())))
-        self.db.set(self.name, self._prov_key(message.from_id), p)
-        await utils.answer(message, self.strings["provider_set"].format(p))
-
-    @loader.command()
     async def tempmail(self, message):
+        """Создать новую временную почту"""
         args = utils.get_args_raw(message).split()
         preferred = args[0].lower() if args else None
         uid = message.from_id
         providers_try = [preferred] + [p for p in self.provider_order if p != preferred] if preferred else list(self.provider_order)
         last_err = None
-        await utils.answer(message, self.strings["trying"].format(preferred or providers_try[0]))
+        await utils.answer(message, f"⏳ Пробую провайдера: {preferred or providers_try[0]}...")
         for p in providers_try:
             prov = self._prov_by_name(p)
             if not prov: continue
@@ -316,6 +288,7 @@ class TempMailModule(loader.Module):
 
     @loader.command()
     async def mymails(self, message):
+        """Показать все свои временные адреса"""
         uid = message.from_id
         history = self._get_history(uid)
         if not history: return await utils.answer(message, self.strings["no_mail"])
@@ -327,6 +300,7 @@ class TempMailModule(loader.Module):
 
     @loader.command()
     async def usemail(self, message):
+        """Сделать выбранный адрес активным"""
         args = utils.get_args_raw(message).split()
         if not args: return await utils.answer(message, self.strings["read_usage"])
         uid = message.from_id
@@ -339,15 +313,40 @@ class TempMailModule(loader.Module):
         await utils.answer(message, self.strings["no_mail"])
 
     @loader.command()
+    async def tinfo(self, message):
+        """Показать активный адрес и провайдера"""
+        uid = message.from_id
+        rec = self._get_active_record(uid)
+        if not rec: return await utils.answer(message, self.strings["no_mail"])
+        await utils.answer(message, self.strings["info"].format(rec["email"], rec["provider"]))
+
+    @loader.command()
+    async def tdemail(self, message):
+        """Удалить активную почту"""
+        uid = message.from_id
+        rec = self._get_active_record(uid)
+        if not rec: return await utils.answer(message, self.strings["no_mail"])
+        prov = self._prov_by_name(rec["provider"])
+        try:
+            await prov.delete_account(email=rec.get("email"), token=rec.get("meta", {}).get("token"))
+        except:
+            pass
+        history = [r for r in self._get_history(uid) if r.get("email") != rec.get("email")]
+        self._save_history(uid, history)
+        self.db.set(self.name, self._active_key(uid), history[0]["email"] if history else None)
+        await utils.answer(message, self.strings["deleted"].format(rec["email"], rec["provider"]))
+
+    @loader.command()
     async def tinbox(self, message):
+        """Показать входящие для активного адреса"""
         uid = message.from_id
         rec = self._get_active_record(uid)
         if not rec: return await utils.answer(message, self.strings["no_mail"])
         prov = self._prov_by_name(rec["provider"])
         try:
             msgs = await prov.list_messages(email=rec.get("email"), token=rec.get("meta", {}).get("token"))
+            if not msgs: return await utils.answer(message, self.strings["empty"])
             items = self._format_inbox_items(rec["provider"], msgs)
-            if not items: return await utils.answer(message, self.strings["empty"])
             out = "\n".join([f"{i['id']}: {i['from']} | {i['subject']}" for i in items])
             await utils.answer(message, self.strings["inbox"].format(len(items), out))
         except Exception as e:
@@ -355,6 +354,7 @@ class TempMailModule(loader.Module):
 
     @loader.command()
     async def tread(self, message):
+        """Прочитать письмо по ID"""
         args = utils.get_args_raw(message).split()
         if not args: return await utils.answer(message, self.strings["read_usage"])
         uid = message.from_id
@@ -365,55 +365,8 @@ class TempMailModule(loader.Module):
         try:
             msg = await prov.read_message(email=rec.get("email"), token=rec.get("meta", {}).get("token"), msg_id=msg_id)
             body = msg.get("text") or msg.get("body") or msg.get("data") or "(no content)"
-            sender = msg.get("from") or msg.get("f") or msg.get("mailfrom") or "(unknown)"
+            sender = msg.get("from") or msg.get("f") or msg.get("mailfrom") or "(unknown sender)"
             subject = msg.get("subject") or msg.get("s") or "(no subject)"
             await utils.answer(message, self.strings["letter"].format(sender, subject, body))
         except Exception as e:
             await utils.answer(message, self.strings["api_error"].format(rec["provider"], str(e)[:RAW_LOG_LEN]))
-
-    @loader.command()
-    async def tdel(self, message):
-        """Удалить письмо по ID"""
-        args = utils.get_args_raw(message).split()
-        if not args:
-            return await utils.answer(message, "❌ Используй: .tdel <id>")
-        uid = message.from_id
-        msg_id = args[0]
-        rec = self._get_active_record(uid)
-        if not rec:
-            return await utils.answer(message, self.strings["no_mail"])
-        prov = self._prov_by_name(rec["provider"])
-        try:
-            await prov.delete_message(email=rec.get("email"), token=rec.get("meta", {}).get("token"), msg_id=msg_id)
-            await utils.answer(message, f"🗑️ Письмо {msg_id} удалено ({rec['provider']})")
-        except Exception as e:
-            await utils.answer(message, self.strings["api_error"].format(rec["provider"], str(e)[:RAW_LOG_LEN]))
-
-    @loader.command()
-    async def tdelmail(self, message):
-        """Удалить почтовый ящик"""
-        uid = message.from_id
-        rec = self._get_active_record(uid)
-        if not rec:
-            return await utils.answer(message, self.strings["no_mail"])
-        prov = self._prov_by_name(rec["provider"])
-        try:
-            if hasattr(prov, "delete_account"):
-                await prov.delete_account(email=rec.get("email"), token=rec.get("meta", {}).get("token"))
-            # Удаляем из истории
-            history = self._get_history(uid)
-            history = [r for r in history if r.get("email") != rec.get("email")]
-            self._save_history(uid, history)
-            self.db.set(self.name, self._active_key(uid), None)
-            await utils.answer(message, self.strings["deleted"].format(rec.get("email"), rec["provider"]))
-        except Exception as e:
-            await utils.answer(message, self.strings["api_error"].format(rec["provider"], str(e)[:RAW_LOG_LEN]))
-
-    @loader.command()
-    async def tinfo(self, message):
-        """Показать активный email и провайдера"""
-        uid = message.from_id
-        rec = self._get_active_record(uid)
-        if not rec:
-            return await utils.answer(message, self.strings["no_mail"])
-        await utils.answer(message, self.strings["info"].format(rec.get("email"), rec["provider"]))
