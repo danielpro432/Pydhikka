@@ -1,250 +1,42 @@
-# TempMail Multi-Provider (Hikka module) — исправленная версия
-# Licensed under GNU AGPLv3
-# Works in Termux/Linux (Python 3.11+)
-# Providers included: mail.tm, 1secmail, getnada, maildrop, mailsac
+from telethon import Button
 
-import aiohttp
-import asyncio
-import json
-import logging
-import random
-import string
-import urllib.parse
-from datetime import datetime
-from .. import loader, utils
+@loader.command()
+async def tmenu(self, message):
+    """Показать интерактивное меню TempMail"""
+    uid = message.from_id
+    active = self.db.get(self.name, self._active_key(uid)) or "нет"
+    text = f"📧 <b>Управление TempMail</b>\nАктивный email: <code>{active}</code>"
 
-logger = logging.getLogger(__name__)
+    buttons = [
+        [Button.inline("Создать новый email", b"create")],
+        [Button.inline("Показать входящие", b"inbox")],
+        [Button.inline("Прочитать письмо", b"read")],
+        [Button.inline("Удалить email", b"delete")],
+        [Button.inline("Мои адреса", b"mymails")],
+        [Button.inline("Выбрать активный", b"usemail")],
+    ]
 
-# General HTTP settings
-HEADERS_BASE = {
-    "User-Agent": "Mozilla/5.0 (Linux; Android 10; Termux) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://google.com/",
-}
+    await self._client.send_message(message.chat_id, text, buttons=buttons)
 
-MAX_TRIES = 3
-RAW_LOG_LEN = 800
+@loader.handler()
+async def callback_handler(self, event):
+    """Обработка нажатий кнопок"""
+    data = event.data.decode("utf-8")
+    uid = event.sender_id
 
-# Provider names order for fallback
-DEFAULT_PROVIDERS = ["mailtm", "1secmail", "getnada", "maildrop", "mailsac"]
-
-# -------------------- Base provider interface --------------------
-class BaseProvider:
-    name = "base"
-
-    def __init__(self):
-        self.session = aiohttp.ClientSession(headers=HEADERS_BASE)
-
-    async def create_address(self):
-        raise NotImplementedError
-
-    async def list_messages(self, email, token=None):
-        raise NotImplementedError
-
-    async def read_message(self, email, msg_id, token=None):
-        raise NotImplementedError
-
-    async def delete_message(self, email, msg_id, token=None):
-        raise NotImplementedError
-
-    async def delete_account(self, email, token=None):
-        # not all providers support deleting account/address
-        raise NotImplementedError
-
-    async def close(self):
-        try:
-            await self.session.close()
-        except Exception:
-            pass
-
-    # helper
-    async def _get(self, url, timeout=15):
-        last = None
-        for attempt in range(1, MAX_TRIES + 1):
-            try:
-                async with self.session.get(url, timeout=timeout) as resp:
-                    text = await resp.text(errors="ignore")
-                    ct = resp.headers.get("Content-Type", "")
-                    return resp.status, ct, text
-            except Exception as e:
-                last = e
-                await asyncio.sleep(0.5 * attempt)
-        raise RuntimeError(f"GET failed: {last}")
-
-    async def _post(self, url, json_data=None, headers=None, timeout=15):
-        last = None
-        for attempt in range(1, MAX_TRIES + 1):
-            try:
-                async with self.session.post(url, json=json_data, headers=headers, timeout=timeout) as resp:
-                    text = await resp.text(errors="ignore")
-                    ct = resp.headers.get("Content-Type", "")
-                    return resp.status, ct, text
-            except Exception as e:
-                last = e
-                await asyncio.sleep(0.5 * attempt)
-        raise RuntimeError(f"POST failed: {last}")
-
-# -------------------- Provider implementations --------------------
-
-# 1) mail.tm - requires create account + token
-class MailTmProvider(BaseProvider):
-    name = "mailtm"
-    base = "https://api.mail.tm"
-
-    async def create_address(self):
-        # get domains
-        status, ct, text = await self._get(f"{self.base}/domains")
-        if status != 200:
-            raise RuntimeError(f"mail.tm domains HTTP {status}")
-        try:
-            data = json.loads(text)
-            # domains may be hydra:member or list
-            if isinstance(data, dict) and "hydra:member" in data:
-                domains = data["hydra:member"]
-                domain = random.choice(domains).get("domain")
-            elif isinstance(data, list):
-                if data and isinstance(data[0], dict):
-                    domain = random.choice(data).get("domain")
-                else:
-                    domain = random.choice(data)
-            else:
-                raise RuntimeError("mail.tm domains parsing failed")
-        except Exception as e:
-            raise RuntimeError(f"mail.tm domains parse: {e}")
-
-        login = "hikka" + "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
-        address = f"{login}@{domain}"
-        password = "HikkaTempPass!" + "".join(random.choices(string.digits, k=4))
-
-        # create account
-        stat, ct, t = await self._post(f"{self.base}/accounts", json_data={"address": address, "password": password})
-        if stat not in (200, 201):
-            # maybe account exists; log but continue to token request (service may return 422/etc)
-            logger.debug("mail.tm create returned: %s %s", stat, t[:200])
-
-        # get token
-        stat, ct, t = await self._post(f"{self.base}/token", json_data={"address": address, "password": password})
-        if stat != 200:
-            raise RuntimeError(f"mail.tm token HTTP {stat}: {t[:200]}")
-        tok = json.loads(t).get("token")
-        if not tok:
-            raise RuntimeError("mail.tm token missing")
-        # store minimal meta
-        return {"email": address, "provider": self.name, "token": tok, "password": password}
-
-    def _auth_headers(self, token):
-        return {"Authorization": f"Bearer {token}"}
-
-    async def list_messages(self, email, token=None):
-        if not token:
-            raise RuntimeError("mail.tm requires token to list messages")
-        headers = {**HEADERS_BASE, **self._auth_headers(token)}
-        async with aiohttp.ClientSession(headers=headers) as s:
-            async with s.get(f"{self.base}/messages") as resp:
-                t = await resp.text(errors="ignore")
-                if resp.status != 200:
-                    raise RuntimeError(f"mail.tm inbox HTTP {resp.status}: {t[:200]}")
-                data = json.loads(t)
-                return data.get("hydra:member", data)
-
-    async def read_message(self, email, msg_id, token=None):
-        if not token:
-            raise RuntimeError("mail.tm requires token to read message")
-        headers = {**HEADERS_BASE, **self._auth_headers(token)}
-        async with aiohttp.ClientSession(headers=headers) as s:
-            async with s.get(f"{self.base}/messages/{msg_id}") as resp:
-                t = await resp.text(errors="ignore")
-                if resp.status != 200:
-                    raise RuntimeError(f"mail.tm read HTTP {resp.status}: {t[:200]}")
-                return json.loads(t)
-
-    async def delete_message(self, email, msg_id, token=None):
-        if not token:
-            raise RuntimeError("mail.tm requires token to delete message")
-        headers = {**HEADERS_BASE, **self._auth_headers(token)}
-        async with aiohttp.ClientSession(headers=headers) as s:
-            async with s.delete(f"{self.base}/messages/{msg_id}") as resp:
-                if resp.status not in (200, 204):
-                    raise RuntimeError(f"mail.tm delete HTTP {resp.status}")
-
-    async def delete_account(self, email, token=None):
-        if not token:
-            raise RuntimeError("mail.tm requires token to delete account")
-        headers = {**HEADERS_BASE, **self._auth_headers(token)}
-        async with aiohttp.ClientSession(headers=headers) as s:
-            # try /me
-            async with s.delete(f"{self.base}/me") as resp:
-                if resp.status in (200, 204):
-                    return
-            # fallback: try accounts search
-            async with s.get(f"{self.base}/accounts") as resp2:
-                txt = await resp2.text(errors="ignore")
-                if resp2.status == 200:
-                    try:
-                        data = json.loads(txt)
-                        members = data.get("hydra:member", data)
-                        for acc in members:
-                            if acc.get("address") == email:
-                                aid = acc.get("id")
-                                if aid:
-                                    async with s.delete(f"{self.base}/accounts/{aid}") as r3:
-                                        if r3.status in (200, 204):
-                                            return
-                    except Exception:
-                        pass
-        raise RuntimeError("mail.tm delete failed")
-
-# 2) 1secmail
-class OneSecMailProvider(BaseProvider):
-    name = "1secmail"
-    base = "https://www.1secmail.com/api/v1/"
-
-    async def create_address(self):
-        # 1secmail provides random mailbox
-        stat, ct, text = await self._get(self.base + "?action=genRandomMailbox&count=1")
-        if stat != 200:
-            raise RuntimeError(f"1secmail create HTTP {stat}")
-        try:
-            data = json.loads(text)
-            return {"email": data[0], "provider": self.name}
-        except Exception:
-            raise RuntimeError("1secmail parse failed")
-
-    async def list_messages(self, email, token=None):
-        login, domain = email.split("@")
-        url = f"{self.base}?action=getMessages&login={urllib.parse.quote(login)}&domain={urllib.parse.quote(domain)}"
-        stat, ct, text = await self._get(url)
-        if stat != 200:
-            raise RuntimeError(f"1secmail inbox HTTP {stat}")
-        try:
-            return json.loads(text)
-        except Exception:
-            raise RuntimeError("1secmail inbox parse failed")
-
-    async def read_message(self, email, msg_id, token=None):
-        login, domain = email.split("@")
-        url = f"{self.base}?action=readMessage&login={urllib.parse.quote(login)}&domain={urllib.parse.quote(domain)}&id={urllib.parse.quote(str(msg_id))}"
-        stat, ct, text = await self._get(url)
-        if stat != 200:
-            raise RuntimeError(f"1secmail read HTTP {stat}")
-        try:
-            return json.loads(text)
-        except Exception:
-            raise RuntimeError("1secmail read parse failed")
-
-    async def delete_message(self, email, msg_id, token=None):
-        # 1secmail doesn't support delete message via API in all cases -> noop
-        raise NotImplementedError
-
-    async def delete_account(self, email, token=None):
-        # not supported
-        raise NotImplementedError
-
-# 3) GetNada
-class GetNadaProvider(BaseProvider):
-    name = "getnada"
-    base = "https://getnada.com/api/v1"
+    if data == "create":
+        await self.tempmail(event)  # вызов команды
+    elif data == "inbox":
+        await self.tinbox(event)
+    elif data == "read":
+        await self._client.send_message(uid, "❌ Используй команду: .tread <id> [email]")
+    elif data == "delete":
+        await self.delmail(event)
+    elif data == "mymails":
+        await self.mymails(event)
+    elif data == "usemail":
+        await self._client.send_message(uid, "❌ Используй команду: .usemail <email>")
+    await event.answer()  # убираем "часики" на кнопке1"
 
     async def create_address(self):
         # pick domain from /domains if possible
