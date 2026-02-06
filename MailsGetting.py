@@ -1,16 +1,3 @@
-Отлично! Вот полностью рабочий вариант модуля TempMail для Hikka, где:
-
-Все провайдеры определены сверху.
-
-Модуль Hikka идёт после всех классов.
-
-Поддержка удаления старых почт, максимум 10 адресов.
-
-Команды .tempmail, .tprovider, .mymails, .usemail, .tinbox, .tread, .delmail, .tinfo, .tdebug.
-
-
-Сохраняй как tempmail.py и кидай в Hikka:
-
 # TempMail Multi-Provider (Hikka module)
 # Licensed under GNU AGPLv3
 # Works in Termux/Linux (Python 3.11+)
