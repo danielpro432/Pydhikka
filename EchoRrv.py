@@ -1,5 +1,6 @@
 from .. import loader, utils
 from telethon.tl.types import Message
+from ..config import ConfigValue
 
 @loader.tds
 class MyEcho(loader.Module):
@@ -14,14 +15,20 @@ class MyEcho(loader.Module):
 
     def __init__(self):
         self.config = loader.ModuleConfig(
-            "enabled", False,  # echo по умолчанию выключен
+            loader.ConfigValue(
+                "enabled",
+                False,
+                "Включить echo сообщений",
+                validator=bool
+            )
         )
 
     async def echcmd(self, message: Message):
         """
         Команда .ech — включает или выключает echo
         """
-        self.config["enabled"] = not self.config["enabled"]
+        current = self.config["enabled"]
+        self.config["enabled"] = not current
         text = self.strings["on"] if self.config["enabled"] else self.strings["off"]
         await utils.answer(message, text)
 
