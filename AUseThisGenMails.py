@@ -364,14 +364,13 @@ class TempMailModule(loader.Module):
         self._save_history(uid, history)
         await utils.answer(message, self.strings["del_done"].format("\n".join(removed)))
 
-    @loader.command() 
-async def setmaxwindows(self, message):
-    """Настроить лимит открытых окон команды: .setmaxwindows 2 (по умолчанию для mymails)"""
-    args = utils.get_args_raw(message).split()
-    if not args or not args[0].isdigit():
-        return await utils.answer(message, "❌ Используй: .setmaxwindows <число 1-10>")
-    val = max(1, min(10, int(args[0])))
-    # По умолчанию меняем для mymails, если явно не указана команда
-    cmd = "mymails" if len(args) == 1 else args[1]
-    self.windows_limit[cmd] = val
-    await utils.answer(message, self.strings["windows_set"].format(cmd, val))
+    @loader.command()
+    async def setmaxwindows(self, message):
+        """Настроить лимит открытых окон команды: .setmaxwindows mymails 2"""
+        args = utils.get_args_raw(message).split()
+        if len(args) != 2 or not args[1].isdigit():
+            return await utils.answer(message, "❌ Используй: .setmaxwindows <mymails/tinbox> <число 1-10>")
+        cmd, val = args
+        val = max(1, min(10, int(val)))
+        self.windows_limit[cmd] = val
+        await utils.answer(message, self.strings["windows_set"].format(cmd, val))
