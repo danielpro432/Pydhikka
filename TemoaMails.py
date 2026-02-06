@@ -1,4 +1,4 @@
-#TempMail MultiProvider (Hikka module) — interactive + auto-rotation
+#TempMail Multi-Provider (Hikka module) - interactive + auto-rotation
 
 Licensed under GNU AGPLv3
 
