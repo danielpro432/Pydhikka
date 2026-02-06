@@ -437,24 +437,31 @@ class TempMailModule(loader.Module):
                 return await utils.answer(message, self.strings["set_active"].format(target))
         await utils.answer(message, self.strings["no_mail"])
 
-    @loader.command()
-    async def tinbox(self, message):
-        """📥 Список входящих писем"""
-        uid = message.from_id
-        record = self._get_active_record(uid)
-        if not record:
-            return await utils.answer(message, self.strings["no_mail"])
-        prov = self._prov_by_name(record["provider"])
-        try:
-            items = await prov.list_messages(record["email"], **record.get("meta", {}))
-            formatted = self._format_inbox_items(record["provider"], items)
-            if not formatted:
-                return await utils.answer(message, self.strings["empty"])
-            out = "\n".join(f"<code>{i['id']}</code> | {i['from']} | {i['subject']}" for i in formatted)
-            await utils.answer(message, self.strings["inbox"].format(len(formatted), out))
-        except Exception as e:
-            await utils.answer(message, self.strings["api_error"].format(record["provider"], str(e)[:RAW_LOG_LEN]))
+@loader.command()
+async def tinbox(self, message):
+    """📥 Показать входящие письма"""
+    uid = message.from_id
+    record = self._get_active_record(uid)
+    if not record:
+        return await utils.answer(message, self.strings["no_mail"])
+    
+    prov = self._prov_by_name(record["provider"])
+    try:
+        if record["provider"] == "mailtm":
+            # mail.tm требует token
+            items = await prov.list_messages(email=record["email"], token=record["meta"]["token"])
+        else:
+            items = await prov.list_messages(record["email"])
 
+        inbox = self._format_inbox_items(record["provider"], items)
+        if not inbox:
+            return await utils.answer(message, self.strings["empty"])
+
+        out = "\n".join(f'<b>{i["id"]}</b> | {i["from"]} | {i["subject"]}' for i in inbox)
+        await utils.answer(message, self.strings["inbox"].format(len(inbox), out))
+
+    except Exception as e:
+        await utils.answer(message, self.strings["api_error"].format(record["provider"], str(e)[:RAW_LOG_LEN]))
     @loader.command()
     async def tread(self, message):
         """📩 Прочитать письмо: .tread <id> [email]"""
@@ -511,12 +518,21 @@ class TempMailModule(loader.Module):
         await utils.answer(message, self.strings["info"].format(record["email"], record["provider"]))
 
     @loader.command()
-    async def tdebug(self, message):
-        """🔎 Debug провайдера"""
-        uid = message.from_id
-        record = self._get_active_record(uid)
-        if not record:
-            return await utils.answer(message, self.strings["no_mail"])
-        prov = self._prov_by_name(record["provider"])
-        raw = self.db.get(self.name, self._lastraw_key(uid), {})
-        await utils.answer(message, self.strings["debug"].format(record["provider"], json.dumps(raw, indent=2)))
+async def tdebug(self, message):
+    """🔎 Debug провайдера"""
+    uid = message.from_id
+    record = self._get_active_record(uid)
+    if not record:
+        return await utils.answer(message, self.strings["no_mail"])
+    
+    prov = self._prov_by_name(record["provider"])
+    try:
+        if record["provider"] == "mailtm":
+            items = await prov.list_messages(email=record["email"], token=record["meta"]["token"])
+        else:
+            items = await prov.list_messages(record["email"])
+
+        await utils.answer(message, self.strings["debug"].format(record["provider"], json.dumps(items, indent=2)))
+
+    except Exception as e:
+        await utils.answer(message, self.strings["api_error"].format(record["provider"], str(e)[:RAW_LOG_LEN]))
