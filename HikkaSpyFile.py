@@ -1,4 +1,4 @@
-__version__ = (2, 16, 1)  # ©️ Dan Gazizullin, 2021-2023
+__version__ = (2, 16, 1)  # Должно быть на самом верху# ©️ Dan Gazizullin, 2021-2023
 # This file is a part of Hikka Userbot
 # Code is licensed under CC-BY-NC-ND 4.0 unless otherwise specified.
 # 🌐 https://github.com/hikariatama/Hikka
