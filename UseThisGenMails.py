@@ -369,7 +369,7 @@ class TempMailModule(loader.Module):
         """Настроить лимит открытых окон команды: .setmaxwindows mymails 2"""
         args = utils.get_args_raw(message).split()
         if len(args) != 2 or not args[1].isdigit():
-            return await utils.answer(message, "❌ Используй: .setmaxwindows <mymails/tinbox> <число 1-10>")
+            return await utils.answer(message, "❌ Используй: .setmaxwindows <mymails/tinbox> <1-10>")
         cmd, val = args
         val = max(1, min(10, int(val)))
         self.windows_limit[cmd] = val
