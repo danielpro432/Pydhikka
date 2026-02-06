@@ -22,6 +22,7 @@ MAX_TRIES = 3
 RAW_LOG_LEN = 800
 DEFAULT_PROVIDERS = ["mailtm", "1secmail", "getnada", "maildrop", "mailsac"]
 DEFAULT_MAX_MAILS = 10
+DEFAULT_MAX_WINDOWS = 2  # Максимум открытых окон для mymails/tinbox
 
 # -------------------- Base Provider --------------------
 class BaseProvider:
@@ -106,7 +107,7 @@ class MailTmProvider(BaseProvider):
                 data = await resp.json()
                 return data.get("hydra:member", [])
 
-# -------------------- Other providers --------------------
+# 1secmail
 class OneSecMailProvider(BaseProvider):
     name = "1secmail"
     base = "https://www.1secmail.com/api/v1/"
@@ -122,6 +123,7 @@ class OneSecMailProvider(BaseProvider):
         stat, ct, text = await self._get(url)
         return json.loads(text)
 
+# GetNada
 class GetNadaProvider(BaseProvider):
     name = "getnada"
     base = "https://getnada.com/api/v1"
@@ -137,6 +139,7 @@ class GetNadaProvider(BaseProvider):
         data = json.loads(text)
         return data.get("msgs", [])
 
+# Maildrop
 class MaildropProvider(BaseProvider):
     name = "maildrop"
     base = "https://api.maildrop.cc/graphql"
@@ -152,6 +155,7 @@ class MaildropProvider(BaseProvider):
         data = json.loads(text)
         return data.get("data", {}).get("inbox", [])
 
+# Mailsac
 class MailsacProvider(BaseProvider):
     name = "mailsac"
     base = "https://mailsac.com/api"
@@ -168,20 +172,21 @@ class MailsacProvider(BaseProvider):
 # -------------------- Hikka module --------------------
 @loader.tds
 class TempMailModule(loader.Module):
-    """TempMail — multi-provider, auto-update, history, read/delete"""
+    """TempMail — multi-provider, auto-update, history, read/delete, delmail"""
 
     strings = {
         "name": "TempMail",
         "created": "📧 <b>Создан адрес</b>\n<code>{}</code>\n<b>Провайдер:</b> {}",
         "no_mail": "❌ <b>Сначала создай почту:</b> <code>.tempmail</code>",
         "empty": "📭 <b>Писем пока нет</b>",
-        "inbox": "📥 <b>Входящие ({})</b>:\n{}",
+        "inbox": "📥 <b>Входящие ({})</b> для <code>{}</code>:\n{}",
         "provider_set": "✅ <b>Провайдер установлен:</b> {}",
         "deleted": "🗑️ Почта удалена: {} (провайдер: {})",
         "mails_list": "📜 <b>Твои адреса:</b>\n{}",
         "set_active": "✅ Активный адрес: <code>{}</code>",
-        "max_set": "✅ Максимальное количество почт установлено: {}",
-        "auto_update_set": "✅ Автообновление {}",
+        "del_prompt": "📌 Выбери почту для удаления (номер или часть адреса, можно несколько через пробел):\n{}",
+        "del_done": "🗑️ Удалены почты:\n{}",
+        "windows_set": "⚙️ Лимит окон команды <code>{}</code> установлен: {}",
     }
 
     def __init__(self):
@@ -196,6 +201,9 @@ class TempMailModule(loader.Module):
         self.provider_order = DEFAULT_PROVIDERS
         self.max_mails = DEFAULT_MAX_MAILS
         self.auto_update = True
+        # Лимит окон для команд
+        self.windows_limit = {"mymails": DEFAULT_MAX_WINDOWS, "tinbox": DEFAULT_MAX_WINDOWS}
+        self._active_windows = {"mymails": [], "tinbox": []}
 
     async def client_ready(self, client, db):
         self.db = db
@@ -204,7 +212,6 @@ class TempMailModule(loader.Module):
     # ---------- helpers ----------
     def _addr_key(self, uid): return f"addrs_{uid}"
     def _active_key(self, uid): return f"addr_{uid}"
-    def _prov_key(self, uid): return f"prov_{uid}"
 
     def _get_history(self, uid):
         return self.db.get(self.name, self._addr_key(uid), [])
@@ -222,9 +229,8 @@ class TempMailModule(loader.Module):
 
     def _add_record(self, uid, record):
         history = self._get_history(uid)
-        # убираем дубликаты
-        history = [r for r in history if r.get("email") != record.get("email")]
         history.insert(0, record)
+        if len(history) > self.max_mails: history = history[:self.max_mails]
         self._save_history(uid, history)
         self.db.set(self.name, self._active_key(uid), record["email"])
 
@@ -251,9 +257,12 @@ class TempMailModule(loader.Module):
             out.append(f"{r.get('id')}: {r.get('from') or r.get('mailfrom') or r.get('f')} | {r.get('subject') or '(no subject)'}")
         return "\n".join(out)
 
-    def _short_email(self, email, max_len=25):
-        if len(email) <= max_len: return email
-        return email[:max_len//2] + "…" + email[-max_len//2:]
+    def _register_window(self, cmd, message):
+        """Обновление списка окон команды и удаление старых"""
+        self._active_windows.setdefault(cmd, [])
+        self._active_windows[cmd].append(message)
+        while len(self._active_windows[cmd]) > self.windows_limit.get(cmd, 2):
+            self._active_windows[cmd].pop(0)
 
     # ---------------- Commands ----------------
     @loader.command()
@@ -273,33 +282,43 @@ class TempMailModule(loader.Module):
     @loader.command()
     async def mymails(self, message):
         """Показать список своих почт"""
+        self._register_window("mymails", message)
         uid = message.from_id
         if self.auto_update: await self._clean_deleted(uid)
         history = self._get_history(uid)
         if not history: return await utils.answer(message, self.strings["no_mail"])
         out = []
-        for i, rec in enumerate(history, 1):
+        for idx, rec in enumerate(history, 1):
             active = " (active)" if rec.get("email") == self.db.get(self.name, self._active_key(uid)) else ""
-            out.append(f"{i}. {self._short_email(rec.get('email'))} [{rec.get('provider')}] {active}")
+            out.append(f"{idx}. {rec.get('email')} [{rec.get('provider')}] {active}")
         await utils.answer(message, self.strings["mails_list"].format("\n".join(out)))
 
     @loader.command()
     async def usemail(self, message):
-        """Выбрать активную почту"""
+        """Выбрать активную почту (по email или номеру)"""
         args = utils.get_args_raw(message).split()
-        if not args: return await utils.answer(message, "❌ Укажи почту")
+        if not args: return await utils.answer(message, "❌ Укажи почту или номер")
         uid = message.from_id
-        email = args[0]
         history = self._get_history(uid)
-        for rec in history:
-            if rec.get("email") == email:
-                self.db.set(self.name, self._active_key(uid), email)
-                return await utils.answer(message, self.strings["set_active"].format(email))
+        target = None
+        for arg in args:
+            if arg.isdigit():
+                idx = int(arg) - 1
+                if 0 <= idx < len(history):
+                    target = history[idx]
+            else:
+                for rec in history:
+                    if arg in rec["email"]:
+                        target = rec
+        if target:
+            self.db.set(self.name, self._active_key(uid), target["email"])
+            return await utils.answer(message, self.strings["set_active"].format(target["email"]))
         await utils.answer(message, "❌ Почта не найдена")
 
     @loader.command()
     async def tinbox(self, message):
         """Показать письма активной почты"""
+        self._register_window("tinbox", message)
         uid = message.from_id
         rec = self._get_active_record(uid)
         if not rec: return await utils.answer(message, self.strings["no_mail"])
@@ -309,25 +328,49 @@ class TempMailModule(loader.Module):
             rec["msgs"] = msgs
             out = self._format_inbox_items(rec)
             if not out: out = self.strings["empty"]
-            await utils.answer(message, self.strings["inbox"].format(len(msgs), out))
+            await utils.answer(message, self.strings["inbox"].format(len(msgs), rec["email"], out))
         except Exception as e:
             await utils.answer(message, f"⚠️ Ошибка API\nПровайдер: {rec['provider']}\nПричина: {str(e)[:RAW_LOG_LEN]}")
 
     @loader.command()
-    async def setmaxmails(self, message):
-        """Установить максимальное количество почт (1–20)"""
-        args = utils.get_args_raw(message).strip()
-        if not args.isdigit(): return await utils.answer(message, "❌ Укажи число от 1 до 20")
-        n = max(1, min(20, int(args)))
-        self.max_mails = n
-        await utils.answer(message, self.strings["max_set"].format(n))
+    async def delmail(self, message):
+        """Удалить почту по номеру, части адреса или полному email"""
+        uid = message.from_id
+        history = self._get_history(uid)
+        if not history:
+            return await utils.answer(message, self.strings["no_mail"])
+        args = utils.get_args_raw(message).split()
+        if not args:
+            # Показать доступные почты
+            out = []
+            for idx, rec in enumerate(history, 1):
+                out.append(f"{idx}. {rec['email']} [{rec['provider']}]")
+            return await utils.answer(message, self.strings["del_prompt"].format("\n".join(out)))
+        to_del = []
+        for arg in args:
+            if arg.isdigit():
+                idx = int(arg)-1
+                if 0 <= idx < len(history):
+                    to_del.append(history[idx])
+            else:
+                for rec in history:
+                    if arg in rec["email"]:
+                        to_del.append(rec)
+        removed = []
+        for rec in to_del:
+            if rec in history:
+                history.remove(rec)
+                removed.append(f"{rec['email']} [{rec['provider']}]")
+        self._save_history(uid, history)
+        await utils.answer(message, self.strings["del_done"].format("\n".join(removed)))
 
     @loader.command()
-    async def autoupdate(self, message):
-        """Включить или отключить автообновление почт (on/off)"""
-        args = utils.get_args_raw(message).strip().lower()
-        if args not in ("on", "off"):
-            return await utils.answer(message, "❌ Укажи `on` или `off`")
-        self.auto_update = args == "on"
-        status = "включено" if self.auto_update else "отключено"
-        await utils.answer(message, self.strings["auto_update_set"].format(status))
+    async def setmaxwindows(self, message):
+        """Настроить лимит открытых окон команды: .setmaxwindows mymails 2"""
+        args = utils.get_args_raw(message).split()
+        if len(args) != 2 or not args[1].isdigit():
+            return await utils.answer(message, "❌ Используй: .setmaxwindows <mymails/tinbox> <число 1-10>")
+        cmd, val = args
+        val = max(1, min(10, int(val)))
+        self.windows_limit[cmd] = val
+        await utils.answer(message, self.strings["windows_set"].format(cmd, val)) 
