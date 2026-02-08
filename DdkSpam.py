@@ -61,7 +61,7 @@ class CountSpamSafe(loader.Module):
                 await message.respond(f"{i} {text}")
                 sent += 1
                 await status.edit(f"🟡 Отправлено: {sent} / {count}")
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(1)
 
             except FloodWaitError as e:
                 await status.edit(f"⏳ FloodWait {e.seconds} сек…")
