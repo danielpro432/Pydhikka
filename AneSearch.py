@@ -1,93 +1,132 @@
 # -*- coding: utf-8 -*-
-# meta developer: @your_username
-# meta name: AniSearch
-# meta description: Ищет аниме по кадру через trace.moe API
-# meta version: 1.0.0
+# meta developer: @yourname
+# name: UniversalSearch
+# description: Модуль для поиска аниме, игр, мультфильмов и артов по кадру. Поддержка SauceNAO и Yandex.Images.
+# meta banner: https://raw.githubusercontent.com/yourname/banner/main/universal_search.jpg
 
-import io
 import logging
+import io
 import aiohttp
-from telethon.tl.types import DocumentAttributeFilename
+import base64
+from telethon import errors
+from telethon.tl.types import Message
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
 @loader.tds
-class AniSearchMod(loader.Module):
-    """Модуль поиска аниме по кадру"""
+class UniversalSearchMod(loader.Module):
+    """Модуль для поиска аниме, игр, мультиков и артов по кадру."""
     strings = {
-        "name": "AniSearch",
-        "no_media": "<b>❌ Реплай на изображение или прикрепи фото к сообщению.</b>",
-        "searching": "<b>🔍 Ищу аниме...</b>",
-        "result": ("✅ <b>Результат поиска:</b>\n"
-                   "• Название: <b>{title}</b>\n"
-                   "• Эпизод: <b>{episode}</b>\n"
-                   "• Время: <b>{time}</b>\n"
-                   "• Сходство: <b>{similarity:.2f}%</b>\n"
-                   "• [Ссылка на аниме](https://anilist.co/anime/{anilist_id})"),
-        "error": "<b>❌ Ошибка при поиске:</b> {error}"
+        "name": "UniversalSearch",
+        "no_reply": "<b>Пожалуйста, ответьте на сообщение с картинкой.</b>",
+        "searching": "<b>🔍 Ищу по кадру...</b>",
+        "not_found": "<b>❌ Не удалось найти результат с достаточной точностью.</b>",
+        "result": "<b>🔎 Найдено:</b>\n\n<b>Источник:</b> {source}\n<b>Название:</b> {title}\n<b>Сходство:</b> {similarity:.1f}%\n<b>Ссылка:</b> {url}"
     }
 
-    @loader.command(
-        ru_doc="<картинка> — ищет аниме по кадру",
-        en_doc="<image> — search anime by frame",
-        alias="anisearch"
-    )
-    async def anisearchcmd(self, message):
-        """Команда для поиска аниме по изображению"""
-        # Получаем объект сообщения, на которое делается reply
-        reply_msg = await message.get_reply_message() if message.is_reply else message
-        media = getattr(reply_msg, "media", None)
+    def __init__(self):
+        super().__init__()
+        self.session = None
+        self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "saucenao_api_key",
+                "",
+                lambda: "Ваш SauceNAO API Key",
+                validator=loader.validators.String()
+            ),
+            loader.ConfigValue(
+                "similarity_threshold",
+                70,
+                lambda: "Минимальный процент сходства для показа результата",
+                validator=loader.validators.Integer(minimum=10, maximum=100)
+            )
+        )
 
-        if not media:
-            await utils.answer(message, self.strings("no_media"))
+    async def client_ready(self, client, db):
+        self.client = client
+        self.session = aiohttp.ClientSession()
+
+    async def _search_saucenao(self, image_bytes: bytes):
+        api_key = self.config["saucenao_api_key"]
+        if not api_key:
+            return []
+
+        url = "https://saucenao.com/search.php"
+        files = {"file": image_bytes}
+        params = {"output_type": 2, "api_key": api_key}
+
+        try:
+            async with self.session.post(url, params=params, data=files) as resp:
+                if resp.status != 200:
+                    logger.warning(f"SauceNAO HTTP error: {resp.status}")
+                    return []
+                data = await resp.json()
+                results = []
+                for item in data.get("results", []):
+                    header = item.get("header", {})
+                    similarity = float(header.get("similarity", 0))
+                    if similarity >= self.config["similarity_threshold"]:
+                        data_item = item.get("data", {})
+                        title = data_item.get("title") or data_item.get("eng_name") or "Неизвестно"
+                        source = data_item.get("source") or data_item.get("ext_urls", ["Неизвестно"])[0]
+                        url_result = data_item.get("ext_urls", [""])[0]
+                        results.append({"title": title, "source": source, "similarity": similarity, "url": url_result})
+                return results
+        except Exception as e:
+            logger.exception(e)
+            return []
+
+    async def _search_yandex(self, image_bytes: bytes):
+        # Yandex reverse image search через URL API (можно доработать через aiohttp)
+        # Возвращаем просто ссылку на поиск, чтобы пользователь сам смотрел
+        encoded = base64.b64encode(image_bytes).decode()
+        search_url = f"https://yandex.ru/images/search?rpt=imageview&img_url=data:image/jpeg;base64,{encoded}"
+        return [{"title": "Проверить на Yandex.Images", "source": "Yandex.Images", "similarity": 100, "url": search_url}]
+
+    @loader.command(
+        ru_doc="<reply на изображение> - Поиск аниме, игр и артов по кадру",
+        en_doc="<reply to image> - Search anime, games, and art by frame"
+    )
+    async def anisearchcmd(self, message: Message):
+        reply = await message.get_reply_message()
+        if not reply or not getattr(reply, "media", None):
+            await utils.answer(message, self.strings("no_reply"))
             return
 
         status_msg = await utils.answer(message, self.strings("searching"))
 
-        # Загружаем изображение в память
-        file_buffer = io.BytesIO()
-        file_name = "anime.jpg"
-
-        if hasattr(media, "document") and media.document:
-            for attr in media.document.attributes:
-                if isinstance(attr, DocumentAttributeFilename):
-                    file_name = attr.file_name
-                    break
-
-        await self.client.download_media(media, file_buffer)
-        file_buffer.seek(0)
-
         try:
-            async with aiohttp.ClientSession() as session:
-                data = aiohttp.FormData()
-                data.add_field('image', file_buffer, filename=file_name, content_type='image/jpeg')
-                async with session.post("https://api.trace.moe/search?anilistInfo", data=data) as resp:
-                    if resp.status != 200:
-                        raise Exception(f"HTTP {resp.status}")
-                    result_json = await resp.json()
+            image_bytes = await self.client.download_media(reply, file=io.BytesIO())
+            image_bytes.seek(0)
+            img_data = image_bytes.read()
 
-            if not result_json.get("result"):
-                await status_msg.edit("<b>❌ Аниме не найдено.</b>")
+            # 1. SauceNAO
+            results = await self._search_saucenao(img_data)
+
+            # 2. Если нет результатов, даём ссылку на Yandex
+            if not results:
+                results = await self._search_yandex(img_data)
+
+            if not results:
+                await status_msg.edit(self.strings("not_found"))
                 return
 
-            top = result_json["result"][0]
-            anilist_id = top.get("anilist", {}).get("id", 0)
-            title = top.get("anilist", {}).get("title", {}).get("romaji", "Unknown")
-            episode = top.get("episode", "Unknown")
-            similarity = top.get("similarity", 0) * 100
-            at_time = top.get("from", 0)
-            minutes, seconds = divmod(int(at_time), 60)
-            time_str = f"{minutes:02d}:{seconds:02d}"
+            text = ""
+            for res in results[:3]:  # Показываем максимум 3 результата
+                text += self.strings("result").format(
+                    source=res["source"],
+                    title=res["title"],
+                    similarity=res["similarity"],
+                    url=res["url"]
+                ) + "\n\n"
 
-            await status_msg.edit(self.strings("result").format(
-                title=title,
-                episode=episode,
-                time=time_str,
-                similarity=similarity,
-                anilist_id=anilist_id
-            ), link_preview=False)
+            await status_msg.edit(text.strip())
 
         except Exception as e:
             logger.exception(e)
-            await status_msg.edit(self.strings("error").format(error=str(e)))
+            await status_msg.edit("<b>❌ Произошла ошибка при поиске.</b>")
+
+    async def client_unload(self):
+        if self.session:
+            await self.session.close()
