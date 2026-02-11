@@ -10,9 +10,7 @@
 import os
 import tempfile
 import logging
-import asyncio
 from telethon.tl.functions.photos import UploadProfilePhotoRequest, DeletePhotosRequest, GetUserPhotosRequest
-from telethon.tl.types import InputPhoto
 from .. import loader, utils
 from PIL import Image
 import moviepy.editor as mp
@@ -36,6 +34,7 @@ class AvCh(loader.Module):
         self._client = client
         self.added_photos = []
 
+        # Сохраняем оригинальные аватарки пользователя
         me = await client.get_me()
         result = await client(GetUserPhotosRequest(user_id=me.id, offset=0, max_id=0, limit=100))
         self.original_photos = result.photos
@@ -53,25 +52,22 @@ class AvCh(loader.Module):
                 await message.client.download_media(r.media, file_path)
 
                 ext = ".jpg"
-                # фото
+                # Фото
                 if r.photo:
                     im = Image.open(file_path)
                     im = im.convert("RGB")
-                    # crop/resize в квадрат
                     size = max(im.width, im.height)
                     new_im = Image.new("RGB", (size, size), (255, 255, 255))
                     new_im.paste(im, ((size - im.width) // 2, (size - im.height) // 2))
                     new_im.save(file_path)
-                # gif или видео
+                # GIF/видео
                 else:
                     mime = getattr(r.media.document, 'mime_type', '')
                     if mime in ["image/gif", "video/mp4"]:
                         ext = ".mp4"
                         clip = mp.VideoFileClip(file_path)
-                        # обрезаем до 5 сек
                         if clip.duration > 5:
                             clip = clip.subclip(0, 5)
-                        # ресайз в квадрат
                         size = max(clip.w, clip.h)
                         clip = clip.resize(height=size).crop(x_center=clip.w/2, y_center=clip.h/2, width=size, height=size)
                         clip.write_videofile(file_path, codec="libx264", audio=False, verbose=False, logger=None)
@@ -81,6 +77,7 @@ class AvCh(loader.Module):
                 uploaded_file = await self._client.upload_file(file_path)
                 new_photo = await self._client(UploadProfilePhotoRequest(file=uploaded_file))
 
+                # Удаляем все предыдущие добавленные аватарки, кроме последней
                 self.added_photos.append(new_photo)
                 if len(self.added_photos) > 1:
                     to_delete = self.added_photos[:-1]
