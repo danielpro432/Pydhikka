@@ -1,6 +1,6 @@
 #   █▀▀ ▄▀█   █▀▄▀█ █▀█ █▀▄ █▀
 #   █▀░ █▀█   █░▀░█ █▄█ █▄▀ ▄█
-#   GigaChat AI с памятью и контекстом
+#   GigaChat AI с памятью и контекстом (cfg-совместимый)
 
 import asyncio
 import logging
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 @loader.tds
 class GigaChat(loader.Module):
-    """Минимальный GigaChat AI с контекстом"""
+    """GigaChat AI с контекстом и cfg-настройками"""
 
     strings = {
         "name": "GigaChat",
@@ -22,23 +22,37 @@ class GigaChat(loader.Module):
         "thinking": "🔄 Думаю...",
     }
 
-    BLOCKED_WORDS = ["террор", "бомб", "убийств", "насилие"]
+    def __init__(self):
+        self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "max_context",
+                10,
+                "📚 Сколько последних сообщений хранить в контексте",
+                validator=loader.validators.Integer(minimum=1, maximum=50),
+            ),
+            loader.ConfigValue(
+                "blocked_words",
+                "террор,бомб,убийств,насилие",
+                "⛔️ Запрещённые слова через запятую",
+                validator=loader.validators.String(),
+            ),
+            loader.ConfigValue(
+                "reply_delay",
+                2.0,
+                "⏱ Задержка перед ответом в секундах",
+                validator=loader.validators.Float(minimum=0.5, maximum=10.0),
+            ),
+        )
 
     async def client_ready(self, client, db):
         self._client = client
         self.db = db
         self.ggbot = "@GigaChat_Bot"
 
-        # один активный чат
         self.active_chat = self.db.get("GigaChat", "active_chat", None)
-
-        # антифлуд
         self.last_reply = 0
-
-        # память контекста: chat_id -> [(role, text)]
         self.context = self.db.get("GigaChat", "context", {}) or {}
 
-        # стартуем бота, чтобы он был готов
         try:
             async with self._client.conversation(self.ggbot) as conv:
                 msg = await conv.send_message("/start")
@@ -48,16 +62,11 @@ class GigaChat(loader.Module):
         except:
             pass
 
-    # -----------------------------
-    # Запрос к AI
-    # -----------------------------
     async def _ask_ai(self, q, chat_id):
         messages = self.context.get(str(chat_id), [])
         prompt_lines = []
-
-        for role, text in messages[-10:]:  # последние 10 сообщений
+        for role, text in messages[-self.config["max_context"]:]:
             prompt_lines.append(f"{role}: {text}")
-
         prompt_lines.append(f"User: {q}")
         prompt = "\n".join(prompt_lines)
 
@@ -72,33 +81,23 @@ class GigaChat(loader.Module):
             except hikkatl.errors.common.AlreadyInConversationError:
                 await asyncio.sleep(3)
 
-    # -----------------------------
-    # Переключение активного чата
-    # -----------------------------
     @loader.command()
     async def giga(self, message):
         """Включить/выключить GigaChat в этом чате"""
         chat_id = utils.get_chat_id(message)
-
         if self.active_chat == chat_id:
             self.active_chat = None
             self.db.set("GigaChat", "active_chat", None)
             return await utils.answer(message, self.strings["disabled"])
-
         self.active_chat = chat_id
         self.db.set("GigaChat", "active_chat", chat_id)
         return await utils.answer(message, self.strings["enabled"])
 
-    # -----------------------------
-    # Проверка запрещённых слов
-    # -----------------------------
     def is_blocked(self, text):
         text = text.lower()
-        return any(w in text for w in self.BLOCKED_WORDS)
+        words = [w.strip() for w in self.config["blocked_words"].split(",")]
+        return any(w in text for w in words)
 
-    # -----------------------------
-    # Watcher: автоответ
-    # -----------------------------
     async def watcher(self, message):
         if message.out or not message.text:
             return
@@ -111,7 +110,7 @@ class GigaChat(loader.Module):
             return
 
         now = time.time()
-        delay = 2
+        delay = self.config["reply_delay"]
         if now - self.last_reply < delay:
             return
         self.last_reply = now
@@ -119,18 +118,16 @@ class GigaChat(loader.Module):
 
         try:
             answer = await self._ask_ai(message.text, chat_id)
-
             if self.is_blocked(answer):
                 return
 
             await message.reply(answer)
 
-            # сохраняем контекст
             msgs = self.context.get(str(chat_id), [])
             msgs.append(("User", message.text))
             msgs.append(("Assistant", answer))
-            self.context[str(chat_id)] = msgs[-50:]  # последние 50 сообщений
+            self.context[str(chat_id)] = msgs[-50:]
             self.db.set("GigaChat", "context", self.context)
 
         except Exception as e:
-            logger.error(f"GigaChat error: {e}") 
+            logger.error(f"GigaChat error: {e}")
