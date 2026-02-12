@@ -121,7 +121,7 @@ class AnimatedQuotesMod(loader.Module):
             return
 
         # Автоудаление "Processing..." через 5 секунд
-        await asyncio.sleep(2)
+        await asyncio.sleep(0.5)
         try:
             await processing_msg.delete()
         except:
