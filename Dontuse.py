@@ -42,8 +42,8 @@ class CountSpamSafe(loader.Module):
 
         if count < 1:
             return
-        if count > 1000:
-            count = 1000  # безопасный предел
+        if count > 10000:
+            count = 10000  # безопасный предел
 
         # Текст сообщения
         text = " ".join(args[1:-1]) if len(args) > 2 else args[1]
@@ -52,12 +52,12 @@ class CountSpamSafe(loader.Module):
         try:
             interval = float(args[-1]) if len(args) > 2 else 1.0
         except ValueError:
-            interval = 1.0
+            interval = 1.5
 
-        if interval < 0.2:
-            interval = 0.2  # минимальная безопасная задержка
-        elif interval > 10:
-            interval = 10  # максимальная задержка
+        if interval < 0.1:
+            interval = 0.1  # минимальная безопасная задержка
+        elif interval > 0.5:
+            interval = 0.5  # максимальная задержка
 
         self.running = True
         sent = 0
