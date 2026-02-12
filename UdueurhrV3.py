@@ -3,7 +3,7 @@
 # 🔒 Licensed under the GNU AGPLv3
 # ---------------------------------------------------------------------------------
 # Name: AChange
-# Description: Смена аватарки (фото / видео / GIF / стикеры / emoji)
+# Description: Смена аватарки с автозумом для GIF/видео/стикеров (без чёрных краёв)
 # meta developer: @FAmods
 # ---------------------------------------------------------------------------------
 
@@ -11,31 +11,21 @@ import os
 import tempfile
 import logging
 import subprocess
-
-from telethon.tl.functions.photos import (
-    UploadProfilePhotoRequest,
-    DeletePhotosRequest,
-    GetUserPhotosRequest
-)
-
+from telethon.tl.functions.photos import UploadProfilePhotoRequest, DeletePhotosRequest, GetUserPhotosRequest
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
-ATTEMPTS_COUNT = 10
-
 
 @loader.tds
 class AChange(loader.Module):
-    """Смена аватарки"""
+    """Смена аватарки - фото, видео, GIF, стикеры (без чёрных краёв)"""
 
     strings = {
         "name": "AChange",
-        "no_reply": "❌ Ответь на медиа (фото/видео/GIF/стикер/emoji)",
-        "processing": "⏳ Обработка...",
+        "no_reply": "❌ Ответь на фото/видео/GIF/стикер",
         "changed": "✅ Аватарка обновлена",
-        "error": "❌ Ошибка обработки",
-        "no_ffmpeg": "❌ FFmpeg не установлен",
-        "no_lottie": "❌ Для emoji нужен: pip install lottie",
+        "error": "❌ Ошибка при обработке",
+        "processing": "⏳ Обработка...",
     }
 
     async def client_ready(self, client, db):
@@ -45,71 +35,49 @@ class AChange(loader.Module):
 
         try:
             me = await client.get_me()
-            result = await client(
-                GetUserPhotosRequest(
-                    user_id=me.id,
-                    offset=0,
-                    max_id=0,
-                    limit=100
-                )
-            )
+            result = await client(GetUserPhotosRequest(user_id=me.id, offset=0, max_id=0, limit=100))
             self.original_photos = result.photos
-        except Exception:
+        except:
             self.original_photos = []
 
     @loader.command()
     async def achange(self, message):
-        """Ответь на медиа — сменить аватарку"""
+        """Меняет аватарку"""
         r = await message.get_reply_message()
 
-        if not r:
+        if not r or not (r.photo or r.document or r.video):
             return await utils.answer(message, self.strings["no_reply"])
 
-        await utils.answer(message, self.strings["processing"])
-
         try:
+            await utils.answer(message, self.strings["processing"])
+
             with tempfile.TemporaryDirectory() as tmp:
 
-                # -------- ОПРЕДЕЛЕНИЕ ТИПА --------
+                # Определяем тип
                 is_photo = r.photo is not None
-                is_video = False
-                mime = None
+                is_video = r.video is not None
+                is_doc = r.document is not None
 
-                if r.document:
-                    mime = r.document.mime_type or ""
+                # Скачиваем
+                raw_file = os.path.join(tmp, "raw")
+                await message.client.download_media(r, raw_file)
 
-                    if mime.startswith("video/"):
-                        is_video = True
-                    elif mime == "image/gif":
-                        is_video = True
-                    elif mime == "application/x-tgsticker":
-                        is_video = True
-
-                # -------- СКАЧИВАНИЕ --------
-                raw_path = os.path.join(tmp, "input")
-                await message.client.download_media(r, raw_path)
-
-                if not os.path.exists(raw_path):
+                if not os.path.exists(raw_file):
                     return await utils.answer(message, self.strings["error"])
 
-                # -------- КОНВЕРТАЦИЯ --------
+                # Фото → JPEG
                 if is_photo:
-                    final = await self._photo_to_jpeg(raw_path, tmp)
+                    final_file = await self._photo_to_jpeg(raw_file, tmp)
                     upload_video = False
                 else:
-                    # emoji (.tgs)
-                    if mime == "application/x-tgsticker":
-                        raw_path = await self._tgs_to_mp4(raw_path, tmp)
-                        if not raw_path:
-                            return await utils.answer(message, self.strings["no_lottie"])
-
-                    final = await self._to_mp4(raw_path, tmp)
+                    # Видео/GIF/Стикер → MP4 (с зумом)
+                    final_file = await self._to_mp4_video(raw_file, tmp)
                     upload_video = True
 
-                if not final:
+                if not final_file or not os.path.exists(final_file):
                     return await utils.answer(message, self.strings["error"])
 
-                uploaded = await self._client.upload_file(final)
+                uploaded = await self._client.upload_file(final_file)
 
                 if upload_video:
                     new_photo = await self._client(
@@ -122,93 +90,77 @@ class AChange(loader.Module):
 
                 self.added_photos.append(new_photo)
 
-                # удаляем старые созданные этим модулем
+                # Удаляем старые временные
                 if len(self.added_photos) > 1:
                     try:
-                        await self._client(
-                            DeletePhotosRequest(self.added_photos[:-1])
-                        )
+                        await self._client(DeletePhotosRequest(self.added_photos[:-1]))
                     except:
                         pass
                     self.added_photos = self.added_photos[-1:]
 
             await utils.answer(message, self.strings["changed"])
 
-        except FileNotFoundError:
-            await utils.answer(message, self.strings["no_ffmpeg"])
         except Exception as e:
-            logger.error(e, exc_info=True)
+            logger.error(f"AChange error: {e}", exc_info=True)
             await utils.answer(message, self.strings["error"])
 
-    # -------------------- PHOTO --------------------
+    # ---------------- PHOTO ----------------
 
-    async def _photo_to_jpeg(self, path, tmp):
+    async def _photo_to_jpeg(self, file_path, tmp_dir):
         try:
             from PIL import Image
 
-            out = os.path.join(tmp, "final.jpg")
-            img = Image.open(path)
+            output = os.path.join(tmp_dir, "final.jpg")
+            img = Image.open(file_path).convert("RGB")
 
-            img = img.convert("RGB")
-            img.thumbnail((640, 640))
+            img.thumbnail((640, 640), Image.Resampling.LANCZOS)
 
-            canvas = Image.new("RGB", (640, 640), (255, 255, 255))
-            offset = (
-                (640 - img.width) // 2,
-                (640 - img.height) // 2
-            )
-            canvas.paste(img, offset)
-            canvas.save(out, "JPEG", quality=95)
+            final = Image.new("RGB", (640, 640), (255, 255, 255))
+            offset = ((640 - img.width) // 2, (640 - img.height) // 2)
+            final.paste(img, offset)
 
-            return out
-        except Exception:
+            final.save(output, "JPEG", quality=95)
+            return output
+
+        except Exception as e:
+            logger.error(f"Photo error: {e}")
             return None
 
-    # -------------------- VIDEO --------------------
+    # ---------------- VIDEO / GIF / STICKER ----------------
 
-    async def _to_mp4(self, path, tmp):
-        out = os.path.join(tmp, "final.mp4")
-
-        cmd = [
-            "ffmpeg",
-            "-i", path,
-            "-t", "10",
-            "-vf",
-            "scale=min(iw\\,540):min(ih\\,540):force_original_aspect_ratio=decrease,"
-            "pad=540:540:(ow-iw)/2:(oh-ih)/2,fps=30",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "28",
-            "-b:v", "600k",
-            "-c:a", "aac",
-            "-b:a", "96k",
-            "-movflags", "+faststart",
-            "-y",
-            out
-        ]
-
-        result = subprocess.run(cmd, capture_output=True)
-
-        if result.returncode != 0:
-            return None
-
-        if os.path.getsize(out) > 10 * 1024 * 1024:
-            return None
-
-        return out
-
-    # -------------------- TGS (emoji) --------------------
-
-    async def _tgs_to_mp4(self, path, tmp):
+    async def _to_mp4_video(self, file_path, tmp_dir):
+        """Авто-зум без чёрных краёв"""
         try:
-            from lottie.importers.tgs import import_tgs
-            from lottie.exporters.video import export_video
+            output = os.path.join(tmp_dir, "final.mp4")
 
-            animation = import_tgs(path)
-            out = os.path.join(tmp, "emoji.mp4")
+            cmd = [
+                "ffmpeg",
+                "-i", file_path,
+                "-t", "10",
 
-            export_video(animation, out, fps=30)
+                # 🔥 Увеличиваем и обрезаем по центру (без рамок)
+                "-vf",
+                "scale=600:600:force_original_aspect_ratio=increase,"
+                "crop=540:540,fps=30",
 
-            return out
-        except Exception:
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-crf", "28",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                "-an",
+                "-y",
+                output
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, timeout=120)
+
+            if result.returncode != 0:
+                logger.error(result.stderr.decode())
+                return None
+
+            return output
+
+        except Exception as e:
+            logger.error(f"Video error: {e}", exc_info=True)
             return None
