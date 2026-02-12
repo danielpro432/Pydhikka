@@ -26,8 +26,8 @@ class AChange(loader.Module):
     strings = {
         "name": "AvatarSw",
         "no_reply": f"❌ Ответь на фото/видео/GIF/стикер\n💬 Попыток: {ATTEMPTS_COUNT} 🤦",
-        "changed": f"✅ Готово!\n💬",
-        "error": f"❌ Ошибка\n💬",
+        "changed": f"✅ Готово!\n",
+        "error": f"❌ Ошибка\n",
         "processing": "⏳ Обработка...",
     }
 
@@ -45,7 +45,7 @@ class AChange(loader.Module):
             self.original_photos = []
 
     @loader.command()
-    async def achange(self, message):
+    async def av(self, message):
         """Меняет аватарку"""
         r = await message.get_reply_message()
         
