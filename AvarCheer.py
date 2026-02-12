@@ -1,39 +1,3 @@
-# ---------------------------------------------------------------------------------
-# Name: AvCh
-# Description: Авто-обрезка до 7 сек + поддержка фото / GIF / видео
-# meta developer: @Dany23s
-# ---------------------------------------------------------------------------------
-
-import os
-import tempfile
-import logging
-
-from telethon.tl.functions.photos import UploadProfilePhotoRequest, DeletePhotosRequest
-from .. import loader, utils
-
-from PIL import Image
-import moviepy.editor as mp
-
-logger = logging.getLogger(__name__)
-
-MAX_DURATION = 7  # лимит секунд
-
-@loader.tds
-class AvCh(loader.Module):
-    """Фото / GIF / Видео → авто 7 секунд → аватарка"""
-
-    strings = {
-        "name": "AvCh",
-        "no_reply": "❌ Ответь на фото, GIF или видео",
-        "changed": "✅ Аватарка обновлена!",
-        "error": "❌ Ошибка при смене аватарки",
-    }
-
-    async def client_ready(self, client, db):
-        self._client = client
-        self.added = []
-
-    @loader.command()
     async def AvCh(self, message):
         reply = await message.get_reply_message()
 
