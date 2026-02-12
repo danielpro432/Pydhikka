@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 ATTEMPTS_COUNT = 9
 
 @loader.tds
-class AChange(loader.Module):
+class Av(loader.Module):
     """Смена аватарки - фото, видео, GIF, стикеры"""
 
     strings = {
