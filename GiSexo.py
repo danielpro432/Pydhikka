@@ -1,6 +1,6 @@
 #   █▀▀ ▄▀█   █▀▄▀█ █▀█ █▀▄ █▀
 #   █▀░ █▀█   █░▀░█ █▄█ █▄▀ ▄█
-#   GigaChat AI с памятью, контекстом и системой роли
+#   GigaChat AI с памятью, контекстом и cfg-настройками
 
 import asyncio
 import logging
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 @loader.tds
 class GigaChat(loader.Module):
-    """GigaChat AI с контекстом и cfg-настройками"""
+    """GigaChat AI с конфигом и системным промптом"""
 
     strings = {
         "name": "GigaChat",
@@ -68,8 +68,9 @@ class GigaChat(loader.Module):
             pass
 
     async def _ask_ai(self, q, chat_id):
+        # Формируем контекст для AI
         messages = self.context.get(str(chat_id), [])
-        prompt_lines = [f"{role}: {text}" for role, text in messages[-self.config['max_context']:]]
+        prompt_lines = [f"{role}: {text}" for role, text in messages[-self.config["max_context"]:]]
         prompt_lines.append(f"{self.config['system_prompt']}")
         prompt_lines.append(f"User: {q}")
         prompt = "\n".join(prompt_lines)
@@ -125,8 +126,11 @@ class GigaChat(loader.Module):
             if self.is_blocked(answer):
                 return
 
+            # Отправка ответа без скобок
+            answer = answer.replace("()", "").strip()
             await message.reply(answer)
 
+            # Сохраняем контекст
             msgs = self.context.get(str(chat_id), [])
             msgs.append(("User", message.text))
             msgs.append(("Assistant", answer))
