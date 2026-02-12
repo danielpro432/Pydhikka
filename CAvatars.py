@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 @loader.tds
 class AChange(loader.Module):
-    """Смена аватарки с сохранением оригиналов (поддержка фото, видео и GIF с автообрезкой)"""
+    """Смена аватарки с сохранением оригиналов (поддержка фото, видео, GIF, видео с текстом)"""
 
     strings = {
         "name": "AChange",
@@ -30,7 +30,7 @@ class AChange(loader.Module):
 
     @loader.command()
     async def AChange(self, message):
-        """Ответом на фото/видео/GIF меняет аватарку, заменяя предыдущие добавленные скриптом"""
+        """Ответом на медиа меняет аватарку, заменяя предыдущие добавленные скриптом"""
         r = await message.get_reply_message()
         if not r or (not r.photo and not r.video and not getattr(r, 'document', None)):
             return await utils.answer(message, self.strings['no_reply'])
@@ -38,14 +38,17 @@ class AChange(loader.Module):
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 if r.photo:
+                    # Фото просто загружаем
                     file_path = os.path.join(tmp, "avatar.jpg")
                     await message.client.download_media(r.photo, file_path)
+
                 elif r.video or (getattr(r, 'document', None) and r.document.mime_type in ["video/mp4", "image/gif"]):
+                    # Видео/GIF конвертируем
                     raw_path = os.path.join(tmp, "raw_media")
                     file_path = os.path.join(tmp, "avatar.mp4")
                     await message.client.download_media(r.media, raw_path)
 
-                    # Конвертируем и обрезаем до 5 секунд, квадрат
+                    # ffmpeg: обрезка до 5 секунд, масштаб до квадрата 512x512, сохраняем текст/наклейки
                     cmd = [
                         "ffmpeg", "-y", "-i", raw_path, "-t", "5",
                         "-vf", "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=black",
@@ -54,20 +57,19 @@ class AChange(loader.Module):
                     ]
                     subprocess.run(cmd, check=True)
 
-                # Загружаем новое фото/видео
+                # Загружаем в Telegram
                 uploaded_file = await self._client.upload_file(file_path)
                 new_photo = await self._client(UploadProfilePhotoRequest(file=uploaded_file))
 
-                # Сохраняем в список добавленных аватарок
+                # Сохраняем список добавленных аватарок и удаляем старые
                 self.added_photos.append(new_photo)
-
-                # Удаляем все предыдущие добавленные, кроме последней
                 if len(self.added_photos) > 1:
                     to_delete = self.added_photos[:-1]
                     await self._client(DeletePhotosRequest(to_delete))
                     self.added_photos = self.added_photos[-1:]
 
             await utils.answer(message, self.strings['changed'])
+
         except Exception as e:
             logger.error(f"AChange error: {e}")
             await utils.answer(message, self.strings['error'])
