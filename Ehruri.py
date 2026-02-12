@@ -3,7 +3,7 @@
 # 🔒 Licensed under the GNU AGPLv3
 # ---------------------------------------------------------------------------------
 # Name: AChange
-# Description: Смена аватарки с сохранением оригиналов (фото, стикеры, смайлики и тд)
+# Description: Смена аватарки с сохранением ориги��алов (статичные + анимированные)
 # meta developer: @FAmods
 # ---------------------------------------------------------------------------------
 
@@ -48,7 +48,6 @@ class AChange(loader.Module):
         r = await message.get_reply_message()
         
         logger.info(f"AChange command triggered")
-        logger.info(f"Reply message: {r}")
         
         if not r:
             logger.info("No reply message found")
@@ -56,16 +55,15 @@ class AChange(loader.Module):
         
         logger.info(f"Reply has photo: {r.photo}")
         logger.info(f"Reply has document: {r.document}")
-        logger.info(f"Reply has media: {r.media}")
         
         # Проверяем есть ли медиа вообще
-        if not (r.photo or r.document or r.media):
+        if not (r.photo or r.document):
             logger.info("No media found in reply")
             return await utils.answer(message, self.strings['no_reply'])
         
         # Определяем тип медиа
-        media_type = self._detect_media_type(r)
-        logger.info(f"Detected media type: {media_type}")
+        media_type, is_animated = self._detect_media_type(r)
+        logger.info(f"Detected media type: {media_type}, animated: {is_animated}")
         
         if not media_type:
             logger.info("Unable to detect media type")
@@ -86,18 +84,33 @@ class AChange(loader.Module):
                 
                 logger.info(f"File size: {os.path.getsize(raw_path)} bytes")
                 
-                # Конвертируем в JPEG
-                jpeg_path = await self._convert_to_jpeg(raw_path, tmp, media_type)
+                # Для статичных фото конвертируем в JPEG
+                # Для GIF и анимированных - оставляем как есть
+                if media_type == "photo" and not is_animated:
+                    final_path = await self._convert_to_jpeg(raw_path, tmp)
+                    upload_as_video = False
+                elif is_animated or media_type in ["gif", "sticker_animated"]:
+                    final_path = raw_path
+                    upload_as_video = True
+                else:
+                    final_path = await self._convert_to_jpeg(raw_path, tmp)
+                    upload_as_video = False
                 
-                if not jpeg_path or not os.path.exists(jpeg_path):
-                    logger.error(f"Conversion failed: {jpeg_path}")
+                if not final_path or not os.path.exists(final_path):
+                    logger.error(f"Preparation failed: {final_path}")
                     return await utils.answer(message, self.strings['error'])
                 
-                logger.info(f"Converted to: {jpeg_path} ({os.path.getsize(jpeg_path)} bytes)")
+                logger.info(f"Final file: {final_path} ({os.path.getsize(final_path)} bytes), upload_as_video: {upload_as_video}")
                 
                 # Загружаем как аватарку
-                uploaded_file = await self._client.upload_file(jpeg_path)
-                new_photo = await self._client(UploadProfilePhotoRequest(file=uploaded_file))
+                uploaded_file = await self._client.upload_file(final_path)
+                
+                if upload_as_video:
+                    logger.info("Uploading as video...")
+                    new_photo = await self._client(UploadProfilePhotoRequest(video=uploaded_file))
+                else:
+                    logger.info("Uploading as photo...")
+                    new_photo = await self._client(UploadProfilePhotoRequest(file=uploaded_file))
                 
                 logger.info(f"Avatar uploaded successfully")
                 
@@ -119,12 +132,14 @@ class AChange(loader.Module):
             await utils.answer(message, self.strings['error'])
 
     def _detect_media_type(self, message):
-        """Определяет тип медиа"""
+        """Определяет тип медиа и является ли оно анимированным"""
+        
+        is_animated = False
         
         # Обычное фото
         if message.photo:
             logger.info("Detected: Photo")
-            return "photo"
+            return "photo", False
         
         # Документ (стикер, GIF, и тд)
         if message.document:
@@ -134,27 +149,33 @@ class AChange(loader.Module):
             
             logger.info(f"Document MIME: {mime_type}, Name: {file_name}")
             
-            # GIF
+            # GIF - АНИМИРОВАННОЕ
             if 'gif' in mime_type or file_name.endswith('.gif'):
-                return "gif"
+                return "gif", True
             
-            # WebP стикер
+            # WebP стикер - может быть анимированным
             if 'webp' in mime_type or file_name.endswith('.webp'):
-                return "sticker_webp"
+                # Проверяем размер - анимированные обычно больше
+                is_anim = getattr(doc, 'size', 0) > 50000
+                return "sticker_webp", is_anim
             
-            # Анимированный стикер
+            # Анимированный стикер TGS
             if 'tgsticker' in mime_type or file_name.endswith('.tgs'):
-                return "sticker_animated"
+                return "sticker_animated", True
+            
+            # WEBM видео-эмодзи
+            if 'webm' in mime_type or file_name.endswith('.webm'):
+                return "video_emoji", True
             
             # Просто изображение
             if mime_type.startswith('image/'):
-                return "image_doc"
+                return "image_doc", False
             
             # PNG, JPG в документе
             if file_name.endswith(('.png', '.jpg', '.jpeg')):
-                return "image_doc"
+                return "image_doc", False
         
-        return None
+        return None, False
 
     async def _download_media(self, message, reply_msg, tmp_dir, media_type):
         """Скачивает медиа файл"""
@@ -175,6 +196,10 @@ class AChange(loader.Module):
                 file_path = os.path.join(tmp_dir, "avatar.tgs")
                 await message.client.download_media(reply_msg.document, file_path)
             
+            elif media_type == "video_emoji":
+                file_path = os.path.join(tmp_dir, "avatar.webm")
+                await message.client.download_media(reply_msg.document, file_path)
+            
             elif media_type == "image_doc":
                 file_path = os.path.join(tmp_dir, "avatar.img")
                 await message.client.download_media(reply_msg.document, file_path)
@@ -190,15 +215,15 @@ class AChange(loader.Module):
             logger.error(f"Download error: {e}", exc_info=True)
             return None
 
-    async def _convert_to_jpeg(self, file_path, tmp_dir, media_type):
-        """Конвертирует в JPEG"""
+    async def _convert_to_jpeg(self, file_path, tmp_dir):
+        """Конвертирует в JPEG только статичные изображения"""
         try:
             from PIL import Image
             
             output_path = os.path.join(tmp_dir, "avatar_final.jpg")
             
             try:
-                logger.info(f"Opening image: {file_path}")
+                logger.info(f"Converting to JPEG: {file_path}")
                 img = Image.open(file_path)
                 logger.info(f"Image mode: {img.mode}, size: {img.size}")
                 
@@ -231,14 +256,14 @@ class AChange(loader.Module):
             
             except Exception as e:
                 logger.error(f"Conversion error: {e}", exc_info=True)
-                # Fallback: копируем и переименовываем
+                # Fallback: копируем оригинал
                 import shutil
                 output_path = os.path.join(tmp_dir, "avatar_final.jpg")
                 shutil.copy(file_path, output_path)
                 return output_path
         
         except ImportError:
-            logger.warning("PIL not installed")
+            logger.warning("PIL not installed, using original file")
             import shutil
             output_path = os.path.join(tmp_dir, "avatar_final.jpg")
             shutil.copy(file_path, output_path)
