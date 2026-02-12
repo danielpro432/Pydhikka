@@ -1,10 +1,8 @@
 # ---------------------------------------------------------------------------------
 # Name: ShowDeps
-# Description: Показывает зависимости установленных модулей
-# meta developer: @Dany23s
+# Description: Показывает зависимости модулей
 # ---------------------------------------------------------------------------------
 
-import importlib
 import importlib.metadata
 
 from .. import loader, utils
@@ -14,27 +12,25 @@ from .. import loader, utils
 class ShowDeps(loader.Module):
     """Показывает зависимости всех модулей"""
 
-    strings = {
-        "name": "ShowDeps",
-    }
+    strings = {"name": "ShowDeps"}
 
     @loader.command()
     async def deps(self, message):
-        """Показать зависимости модулей"""
+        """Показать зависимости"""
 
         result = "<b>📦 Зависимости модулей:</b>\n\n"
 
         for mod in self.allmodules.modules:
             name = mod.__class__.__name__
 
-            requires = getattr(mod, "__doc__", "")
-            lines = requires.split("\n")
+            doc = mod.__doc__ or ""  # ← фикс
+            lines = doc.split("\n")
 
             deps = []
             for line in lines:
                 if "requires:" in line.lower():
                     deps_line = line.split("requires:")[1].strip()
-                    deps = [x.strip() for x in deps_line.split(",")]
+                    deps = [x.strip() for x in deps_line.split(",") if x.strip()]
 
             if not deps:
                 continue
@@ -51,5 +47,8 @@ class ShowDeps(loader.Module):
                     result += f"  ❌ {pkg} (не установлен)\n"
 
             result += "\n"
+
+        if result.strip() == "<b>📦 Зависимости модулей:</b>":
+            result += "Зависимости не найдены."
 
         await utils.answer(message, result)
