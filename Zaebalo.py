@@ -26,7 +26,7 @@ class AChange(loader.Module):
         "no_reply": "❌ Нужно ответить на фото, видео или GIF (JPEG/PNG/MP4/GIF)",
         "changed": "✅ Аватарка обновлена!",
         "error": "❌ Ошибка при смене аватарки",
-        "processing": "⏳ Обработка видео...",
+        "processing": "⏳ Обработка видео (может занять время)...",
         "video_error": "❌ Ошибка обработки видео",
     }
 
@@ -110,24 +110,34 @@ class AChange(loader.Module):
         return mime_type == 'image/gif' or (hasattr(document, 'file_name') and document.file_name.lower().endswith('.gif'))
 
     def _trim_video(self, input_path, output_path, duration=6):
-        """Обрезает видео до указанной длительности используя ffmpeg"""
+        """Обрезает видео до указанной длительности ис��ользуя ffmpeg с оптимизацией для Heroku"""
         try:
-            # Команда ffmpeg для обрезания видео
+            # Оптимизированная команда ffmpeg для быстрой обработки
+            # Используем faster preset и меньший bitrate для Heroku
             command = [
                 'ffmpeg',
                 '-i', input_path,
                 '-t', str(duration),  # Длительность в секундах
+                '-vf', 'scale=540:540:force_original_aspect_ratio=decrease,pad=540:540:(ow-iw)/2:(oh-ih)/2',  # Масштабирование и паддинг
                 '-c:v', 'libx264',  # Видео кодек
+                '-preset', 'ultrafast',  # Самый быстрый preset (вместо default)
+                '-crf', '28',  # Качество (28 = оптимум размер/качество)
+                '-b:v', '500k',  # Bitrate видео (низкий для Heroku)
                 '-c:a', 'aac',  # Аудио кодек
+                '-b:a', '96k',  # Bitrate аудио (низкий)
+                '-threads', '2',  # Ограничиваем количество потоков
                 '-y',  # Перезаписать выходной файл
                 output_path
             ]
             
-            # Выполняем команду
-            result = subprocess.run(command, capture_output=True, timeout=30)
+            logger.info(f"Starting FFmpeg with command: {' '.join(command)}")
+            
+            # Выполняем команду с увеличенным timeout (60 сек для Heroku)
+            result = subprocess.run(command, capture_output=True, timeout=120)
             
             if result.returncode != 0:
-                logger.error(f"FFmpeg error: {result.stderr.decode()}")
+                error_msg = result.stderr.decode() if result.stderr else "Unknown error"
+                logger.error(f"FFmpeg error: {error_msg}")
                 return False
             
             # Проверяем размер файла (<10MB)
@@ -143,7 +153,7 @@ class AChange(loader.Module):
             logger.error("FFmpeg not found. Install it: apt-get install ffmpeg")
             return False
         except subprocess.TimeoutExpired:
-            logger.error("FFmpeg timeout")
+            logger.error("FFmpeg timeout - video too large or Heroku resources insufficient")
             return False
         except Exception as e:
             logger.error(f"Video trimming error: {e}")
