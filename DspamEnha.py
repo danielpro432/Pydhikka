@@ -18,7 +18,7 @@ class CountSpamSafe(loader.Module):
     async def countsafecmd(self, message):
         """
         .countsafe <число> <текст> [<секунды>]
-        Пример: .countsafe 100 кукуруза 2
+        Пример: .countsafe 10 Text 0.5
         Если <секунды> не указаны — по умолчанию 1 секунда
         """
         if self.running:
@@ -54,8 +54,8 @@ class CountSpamSafe(loader.Module):
         except ValueError:
             interval = 1.0
 
-        if interval < 0.5:
-            interval = 0.5  # минимальная безопасная задержка
+        if interval < 0.2:
+            interval = 0.2  # минимальная безопасная задержка
         elif interval > 10:
             interval = 10  # максимальная задержка
 
