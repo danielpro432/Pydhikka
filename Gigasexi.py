@@ -1,11 +1,10 @@
 #   █▀▀ ▄▀█   █▀▄▀█ █▀█ █▀▄ █▀
 #   █▀░ █▀█   █░▀░█ █▄█ █▄▀ ▄█
-#   GigaChat AI с памятью и контекстом (cfg-совместимый)
+#   GigaChat AI с памятью, контекстом и системой роли
 
 import asyncio
 import logging
 import time
-
 from .. import loader, utils
 import hikkatl
 
@@ -24,6 +23,12 @@ class GigaChat(loader.Module):
 
     def __init__(self):
         self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "system_prompt",
+                "Ты — дружелюбный AI ассистент, отвечай вежливо и кратко.",
+                "📝 Роль бота (можно писать: Ты — Халк, Шерлок, кто угодно)",
+                validator=loader.validators.String(),
+            ),
             loader.ConfigValue(
                 "max_context",
                 10,
@@ -64,9 +69,8 @@ class GigaChat(loader.Module):
 
     async def _ask_ai(self, q, chat_id):
         messages = self.context.get(str(chat_id), [])
-        prompt_lines = []
-        for role, text in messages[-self.config["max_context"]:]:
-            prompt_lines.append(f"{role}: {text}")
+        prompt_lines = [f"{role}: {text}" for role, text in messages[-self.config['max_context']:]]
+        prompt_lines.append(f"{self.config['system_prompt']}")
         prompt_lines.append(f"User: {q}")
         prompt = "\n".join(prompt_lines)
 
