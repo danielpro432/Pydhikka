@@ -4,20 +4,18 @@ from .. import loader, utils
 
 @loader.tds
 class TxtPyMaker(loader.Module):
-    """Создает редактируемый TXT файл и превращает его в PY с авто-очисткой"""
+    """Создает пустой TXT файл и превращает его в PY"""
 
     strings = {"name": "TxtPyMaker"}
 
     @loader.command()
     async def newtxt(self, message):
-        """Создать новый TXT файл"""
+        """Создать новый пустой TXT файл"""
         file_name = f"code_{int(time.time())}.txt"
-        with open(file_name, "w", encoding="utf-8") as f:
-
-        # Отправляем как файл, а не как текст
+        open(file_name, "w", encoding="utf-8").close()  # создаём пустой файл
         await message.client.send_file(message.chat_id, file_name)
-        os.remove(file_name)  # удаляем сразу после отправки
-        await utils.answer(message, f"Создан новый TXT файл: **{file_name}**")
+        os.remove(file_name)
+        await utils.answer(message, f"Создан пустой TXT файл: **{file_name}**")
 
     @loader.command()
     async def txt2py(self, message):
@@ -28,7 +26,6 @@ class TxtPyMaker(loader.Module):
         file_path = await message.client.download_media(reply)
         py_name = file_path.replace(".txt", ".py")
         os.rename(file_path, py_name)
-        # Отправляем как Python файл
         await message.client.send_file(message.chat_id, py_name)
-        os.remove(py_name)  # удаляем сразу после отправки
+        os.remove(py_name)
         await utils.answer(message, f"TXT -> PY файл создан: **{py_name}**")
