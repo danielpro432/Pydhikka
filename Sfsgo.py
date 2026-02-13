@@ -1,17 +1,18 @@
 # meta developer: @Dany23s
-# meta name: CodeCollector
+# meta name: SafeCodeCollector
 # meta icon: 📝
 
 import os
 import asyncio
+from html import unescape
 from .. import loader, utils
 
 @loader.tds
-class CodeCollector(loader.Module):
-    """Собирает код из сообщений и создаёт один .py файл"""
+class SafeCodeCollector(loader.Module):
+    """Собирает код из сообщений и создаёт безопасный .py файл"""
 
     strings = {
-        "name": "CodeCollector",
+        "name": "SafeCodeCollector",
         "no_code": "<b>Нет кода для добавления.</b>",
         "added": "<b>Код добавлен к сборке.</b>",
         "file_created": "<b>Файл {filename} создан и отправлен.</b>",
@@ -33,7 +34,9 @@ class CodeCollector(loader.Module):
                 await utils.answer(message, self.strings["no_code"])
                 return
 
-        self.buffer.append(text)
+        # Убираем Telegram HTML-форматирование
+        safe_text = unescape(text).replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+        self.buffer.append(safe_text)
         await utils.answer(message, self.strings["added"])
 
     @loader.command()
@@ -43,15 +46,16 @@ class CodeCollector(loader.Module):
             await utils.answer(message, self.strings["no_code"])
             return
 
-        filename = f"CodeCollected_{int(asyncio.get_event_loop().time())}.py"
+        filename = f"CollectedCode_{int(asyncio.get_event_loop().time())}.py"
         with open(filename, "w", encoding="utf-8") as f:
             f.write("\n\n".join(self.buffer))
 
         await message.client.send_file(message.chat_id, filename)
         await utils.answer(message, self.strings["file_created"].format(filename=filename))
 
-        os.remove(filename)  # удаляем локально после отправки
+        # После создания файла буфер очищается
         self.buffer.clear()
+        os.remove(filename)
 
     @loader.command()
     async def clearcode(self, message):
