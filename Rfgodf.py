@@ -11,7 +11,6 @@ class CodeBuilder(loader.Module):
     def __init__(self):
         self._code_parts = []
         self._filename = None
-        # Создаём временную директорию для Heroku
         self.temp_dir = "/tmp"
         if not os.path.exists(self.temp_dir):
             os.makedirs(self.temp_dir)
@@ -29,7 +28,7 @@ class CodeBuilder(loader.Module):
 
         self._code_parts.append(code)
         await utils.answer(
-            message, 
+            message,
             f"✅ Код добавлен. Текущие части: {len(self._code_parts)}"
         )
 
@@ -47,66 +46,48 @@ class CodeBuilder(loader.Module):
 
             full_code = "\n".join(self._code_parts)
 
-            # Сохраняем файл во временную папку
             with open(self._filename, "w", encoding="utf-8") as f:
                 f.write(full_code)
 
-            # Отправляем файл
             await message.client.send_file(
                 message.chat_id,
                 self._filename,
                 caption=f"📄 Файл **{filename}** создан и отправлен."
             )
 
-            # Сбрасываем код
             self._code_parts = []
 
-            # Удаляем файл после отправки (для экономии места на Heroku)
             if os.path.exists(self._filename):
                 os.remove(self._filename)
 
         except Exception as e:
-            await utils.answer(message, f"❌ Ошибка при создании файла: {str(e)}")
+            await utils.answer(message, f"❌ Ошибка: {str(e)}")
 
     @loader.command()
     async def cleancode(self, message):
         """Очистить все добавленные куски кода"""
         self._code_parts = []
-        await utils.answer(message, "🗑️ Все добавленные куски кода очищены.")
+        await utils.answer(message, "🗑️ Код очищен.")
 
     @loader.command()
     async def codeparts(self, message):
         """Показать количество добавленных частей"""
         count = len(self._code_parts)
-        await utils.answer(message, f"📊 Добавленных частей кода: {count}")
+        await utils.answer(message, f"📊 Частей кода: {count}")
 
     @loader.command()
     async def showcode(self, message):
         """Показать весь собранный код"""
         if not self._code_parts:
-            await utils.answer(message, "❌ Нет добавленного кода!")
+            await utils.answer(message, "❌ Нет кода!")
             return
-        
+
         full_code = "\n".join(self._code_parts)
-        
+
         if len(full_code) > 4000:
             await utils.answer(
-                message, 
-                f"```python\n{full_code[:3990]}\n```\n⚠️ ... (текст обрезан)"
+                message,
+                f"```python\n{full_code[:3990]}\n```\n⚠️ Обрезано"
             )
         else:
             await utils.answer(message, f"```python\n{full_code}\n```")
-
-    @loader.command()
-    async def setfilename(self, message):
-        """Установить имя файла"""
-        filename = utils.get_args_raw(message)
-        if not filename:
-            await utils.answer(message, "❌ Укажите имя файла!")
-            return
-        
-        if not filename.endswith('.py'):
-            filename += '.py'
-        
-        self._filename = filename
-        await utils.answer(message, f"✅ Имя файла установлено: {filename}")
