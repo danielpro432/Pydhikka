@@ -1,0 +1,60 @@
+# meta developer: @Dany23s
+# meta name: CodeCollector
+# meta icon: 📝
+
+import os
+import asyncio
+from .. import loader, utils
+
+@loader.tds
+class CodeCollector(loader.Module):
+    """Собирает код из сообщений и создаёт один .py файл"""
+
+    strings = {
+        "name": "CodeCollector",
+        "no_code": "<b>Нет кода для добавления.</b>",
+        "added": "<b>Код добавлен к сборке.</b>",
+        "file_created": "<b>Файл {filename} создан и отправлен.</b>",
+        "cleared": "<b>Сборка очищена.</b>",
+    }
+
+    def __init__(self):
+        self.buffer = []
+
+    @loader.command()
+    async def addcode(self, message):
+        """Добавить код в сборку"""
+        text = utils.get_args_raw(message)
+        if not text:
+            reply = await message.get_reply_message()
+            if reply and reply.text:
+                text = reply.text
+            else:
+                await utils.answer(message, self.strings["no_code"])
+                return
+
+        self.buffer.append(text)
+        await utils.answer(message, self.strings["added"])
+
+    @loader.command()
+    async def createpy(self, message):
+        """Создать .py файл из собранного кода"""
+        if not self.buffer:
+            await utils.answer(message, self.strings["no_code"])
+            return
+
+        filename = f"CodeCollected_{int(asyncio.get_event_loop().time())}.py"
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write("\n\n".join(self.buffer))
+
+        await message.client.send_file(message.chat_id, filename)
+        await utils.answer(message, self.strings["file_created"].format(filename=filename))
+
+        os.remove(filename)  # удаляем локально после отправки
+        self.buffer.clear()
+
+    @loader.command()
+    async def clearcode(self, message):
+        """Очистить текущую сборку"""
+        self.buffer.clear()
+        await utils.answer(message, self.strings["cleared"])
