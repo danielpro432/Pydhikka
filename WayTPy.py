@@ -13,7 +13,7 @@ class TxtPyMaker(loader.Module):
         """Создать новый TXT файл"""
         file_name = f"code_{int(time.time())}.txt"
         with open(file_name, "w", encoding="utf-8") as f:
-            f.write("")
+            f.write("#\n")
         # Отправляем как файл, а не как текст
         await message.client.send_file(message.chat_id, file_name)
         os.remove(file_name)  # удаляем сразу после отправки
