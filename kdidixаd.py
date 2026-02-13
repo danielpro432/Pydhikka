@@ -12,23 +12,31 @@
 # meta banner: https://github.com/sqlmerr/hikka_mods/blob/main/assets/banners/egsfreegames.png?raw=true
 
 import datetime
+from typing import Dict, List, Optional
 import aiohttp
-from typing import List, Dict, Optional
 
-from .. import loader, utils
+from .. import utils, loader
 from hikkatl.tl.patched import Message
+
 
 @loader.tds
 class EGSFreeGames(loader.Module):
-    """Следим за бесплатными играми в Epic Games Store и присылаем только новые"""
+    """Module for checking free games in Epic Games Store on Heroku userbot"""
 
     strings = {
         "name": "EGSFreeGames",
-        "game": "- <b>{title}</b>\n  <i>Статус</i>: {status}\n  <i>Начало</i>: <code>{start}</code>\n  <i>Конец</i>: <code>{end}</code>\n  <i>Ссылка</i>: {url}\n",
-        "header": "🎮 <b>Новые бесплатные игры в EGS:</b>",
-        "footer": "ℹ️ Статус <code>active</code> — доступна сейчас, <code>upcoming</code> — скоро.",
-        "_region_cfg": "Регион проверки бесплатных игр",
-        "_schedule_cfg": "Автоматически присылать новые бесплатные игры",
+        "game": (
+            "-  <b>Game</b>: {title}\n"
+            "    <i>Status</i>: {status}\n"
+            "    <i>Promotion started at</i>: <code>{start}</code>\n"
+            "    <i>Promotion will end at</i>: <code>{end}</code>\n"
+            "    <i>Link</i>: {url}\n"
+        ),
+        "header_bot": "🎮 <b>New free games in EGS:</b>",
+        "footer": "<i>Only newly free games are shown.</i>",
+        "_region_cfg": "Free games check region",
+        "_schedule_cfg": "Automatically send new free games to chat",
+        "_chat_cfg": "Chat ID or username for sending free games",
     }
 
     def __init__(self):
@@ -45,89 +53,82 @@ class EGSFreeGames(loader.Module):
                 doc=lambda: self.strings("_schedule_cfg"),
                 validator=loader.validators.Boolean(),
             ),
+            loader.ConfigValue(
+                "chat_id",
+                default=None,
+                doc=lambda: self.strings("_chat_cfg"),
+                validator=loader.validators.String(),
+            ),
         )
-        self.sent_games: set = set()
-        self.chat = None
-
-    async def client_ready(self, client, db):
-        self._client = client
-        self.db = db
-        # создаём/находим чат для рассылки
-        self.chat, _ = await utils.asset_channel(
-            self._client,
-            "EGS Free Games",
-            "Здесь бот присылает новые бесплатные игры из Epic Games Store",
-            avatar="https://github.com/sqlmerr/hikka_mods/blob/main/assets/icons/egsfreegames_chat.png?raw=true",
-            invite_bot=True,
-            _folder="hikka"
-        )
+        self.sent_games: set = set()  # хранит slug отправленных игр
 
     async def get_free_games(self, region: str = "RU") -> Optional[List[Dict]]:
         url = "https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions"
         params = {"locale": "en-US", "country": region, "allowCountries": region}
-        async with aiohttp.ClientSession() as session:
-            try:
-                resp = await session.get(url, params=params)
-                resp.raise_for_status()
-                data = await resp.json()
+        try:
+            async with aiohttp.ClientSession() as session:
+                response = await session.get(url, params=params)
+                response.raise_for_status()
+                data = await response.json()
                 games = []
                 for game in data["data"]["Catalog"]["searchStore"]["elements"]:
                     promotions = game.get("promotions")
                     if not promotions:
                         continue
-
-                    for promo_type, status in [
-                        ("promotionalOffers", "active"),
-                        ("upcomingPromotionalOffers", "upcoming")
-                    ]:
-                        for offer_set in promotions.get(promo_type, []):
-                            for offer in offer_set.get("promotionalOffers", []):
-                                if offer["discountSetting"]["discountPercentage"] == 0:
-                                    slug = game.get("productSlug") or game["catalogNs"]["mappings"][0]["pageSlug"]
+                    promo_now = promotions.get("promotionalOffers", [])
+                    promo_upcoming = promotions.get("upcomingPromotionalOffers", [])
+                    for offers, status in [(promo_now, "active"), (promo_upcoming, "upcoming")]:
+                        for offer_group in offers:
+                            for offer in offer_group.get("promotionalOffers", []):
+                                slug = game.get("productSlug") or game["catalogNs"]["mappings"][0]["pageSlug"]
+                                if slug not in self.sent_games and offer["discountSetting"]["discountPercentage"] > 0:
                                     games.append({
-                                        "id": f"{game['id']}_{status}",
                                         "title": game["title"],
+                                        "slug": slug,
                                         "status": status,
                                         "start": offer["startDate"],
                                         "end": offer["endDate"],
                                         "url": f"https://store.epicgames.com/ru/p/{slug}"
                                     })
                 return games
-            except aiohttp.ClientError:
-                return []
+        except Exception:
+            return []
 
-    def format_games(self, games: List[Dict]) -> str:
+    def gen_text(self, games: List[Dict]) -> str:
         if not games:
             return ""
-        header = self.strings("header")
         text = "".join([
             self.strings("game").format(
                 title=g["title"],
                 status=g["status"],
-                start=self.format_date(g["start"]),
-                end=self.format_date(g["end"]),
+                start=g["start"],
+                end=g["end"],
                 url=g["url"]
-            )
-            for g in games
+            ) + "\n" for g in games
         ])
-        footer = self.strings("footer")
-        return f"{header}\n\n{text}{footer}"
+        return f"{self.strings('header_bot')}\n\n{text}{self.strings('footer')}"
 
-    @staticmethod
-    def format_date(date_str: str) -> str:
-        dt = datetime.datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-        dt = dt.astimezone(datetime.timezone.utc)
-        return dt.strftime("%d.%m.%Y %H:%M (UTC)")
+    @loader.command(ru_doc="Получить новые бесплатные игры в EGS")
+    async def egsgames(self, message: Message):
+        """Get new free games"""
+        games = await self.get_free_games(self.config["region"])
+        for g in games:
+            self.sent_games.add(g["slug"])
+        text = self.gen_text(games)
+        if text:
+            await utils.answer(message, text)
 
     @loader.loop(interval=3600, autostart=True)
-    async def loop(self):
+    async def loop(self, *args, **kwargs):
         if not self.config["schedule_checking"]:
             return
-        games = await self.get_free_games(self.config["region"])
-        new_games = [g for g in games if g["id"] not in self.sent_games and g["status"] == "active"]
-        if not new_games:
+        chat_id = self.config["chat_id"]
+        if not chat_id:
             return
-        self.sent_games.update([g["id"] for g in new_games])
-        text = self.format_games(new_games)
+        games = await self.get_free_games(self.config["region"])
+        new_games = [g for g in games if g["slug"] not in self.sent_games]
+        for g in new_games:
+            self.sent_games.add(g["slug"])
+        text = self.gen_text(new_games)
         if text:
-            await self._client.send_message(utils.get_entity_id(self.chat), text)
+            await self._client.send_message(chat_id, text)
