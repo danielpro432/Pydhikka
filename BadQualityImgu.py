@@ -25,14 +25,14 @@ class VidQualImage(loader.Module):
         if not mime.startswith("image"):
             return await m.respond("Ошибка: это не изображение.")
 
-        # scale и качество (чем выше уровень — тем хуже)
+        # scale и q для мягкой деградации
         lvls = {
-            "1": ("0.95", "10"),
-            "2": ("0.90", "15"),
-            "3": ("0.85", "20"),
-            "4": ("0.80", "25"),
-            "5": ("0.75", "30"),
-            "6": ("0.70", "35"),
+            "1": ("0.97", "8"),
+            "2": ("0.94", "12"),
+            "3": ("0.91", "16"),
+            "4": ("0.88", "20"),
+            "5": ("0.85", "24"),
+            "6": ("0.82", "28"),
         }
 
         args = utils.get_args_raw(m)
@@ -46,17 +46,17 @@ class VidQualImage(loader.Module):
             temp = "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
             outfile = "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
 
-            # немного уменьшаем размер + жёстко JPEG-квантизация
+            # 1. Немного уменьшаем + сильное сжатие
             os.system(
                 f'ffmpeg -y -i "{infile}" '
-                f'-vf "scale=iw*{scale}:ih*{scale}" '
+                f'-vf "scale=iw*{scale}:ih*{scale}:flags=lanczos" '
                 f'-q:v {q} -pix_fmt yuv444p "{temp}"'
             )
 
-            # возвращаем обратно исходный размер, чтобы артефакты были мягко растянуты
+            # 2. Возвращаем исходный размер, чтобы артефакты растянулись мягко
             os.system(
                 f'ffmpeg -y -i "{temp}" '
-                f'-vf "scale=iw/{scale}:ih/{scale}" '
+                f'-vf "scale=iw/{scale}:ih/{scale}:flags=lanczos" '
                 f'-q:v {q} -pix_fmt yuv444p "{outfile}"'
             )
 
