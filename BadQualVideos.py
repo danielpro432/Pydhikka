@@ -1,7 +1,6 @@
-#  Dany23s   
-# ху
-#чле
-# нет0
+#   Coded by Dany    #
+#     t.me/Dany23s      #
+# This code under AGPL-3.0 #
 
 import os
 import random
@@ -9,12 +8,12 @@ import string
 from .. import loader, utils
 
 @loader.tds
-class VideoQual(loader.Module):
-    strings = {"name": "VidLow-quality"}
+class VidQualVideo(loader.Module):
+    strings = {"name": "VidQual-video"}
 
     @loader.owner
     async def qvlcmd(self, m):
-        " <реплай на видео> <уровень от 1 до 6 (по умолчанию 3)>\n "
+        ".qvl <реплай на видео> <уровень от 1 до 6 (по умолчанию 3)>\nСжакалить видео"
 
         reply = await m.get_reply_message()
         if not reply:
@@ -43,8 +42,8 @@ class VideoQual(loader.Module):
         )
 
         await reply.reply(file=out)
-        await m.delete()  # команда удаляется, никакого текста
+        await m.delete()  # команда сразу удаляется
 
-        # Чистка файлов
+        # Чистка
         os.remove(vid)
         os.remove(out)
