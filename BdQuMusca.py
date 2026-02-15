@@ -18,24 +18,22 @@ class AudioQual(loader.Module):
 
         reply = await m.get_reply_message()
         if not reply or not reply.file:
-            return  # без сообщения
+            return  # просто молча ничего
 
         await m.delete()
 
         mime = reply.file.mime_type or ""
         if not (mime.startswith("video") or mime.startswith("audio")):
-            return  # без сообщения
+            return  # молча, если не видео/аудио
 
-        # пользователь сам вводит битрейт
+        # пользователь вводит битрейт, без границ
         args = utils.get_args_raw(m)
         try:
             br = int(args)
             if br < 1:
                 br = 1
-            elif br > 128:
-                br = 128
         except:
-            br = 16  # default низкий, реально ухудшает
+            br = 16  # default низкий для заметного ухудшения
 
         lvl_a = f"{br}k"
 
@@ -46,7 +44,7 @@ class AudioQual(loader.Module):
         )
         outfile = "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".mp3"
 
-        # ffmpeg: извлекаем аудио и ухудшаем
+        # ffmpeg: извлечение аудио и ухудшение через низкий битрейт + ресемплинг
         os.system(
             f'ffmpeg -y -i "{infile}" -vn -c:a libmp3lame -b:a {lvl_a} -ar 8000 "{outfile}"'
         )
