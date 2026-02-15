@@ -1,6 +1,5 @@
-#   Coded by Dany    #
-#     t.me/Dany23s      #
-# This code under AGPL-3.0 #
+
+#     t.me/Dany23s This code under AGPL-me 
 
 import os
 import random
@@ -13,7 +12,7 @@ class VidQualVideo(loader.Module):
 
     @loader.owner
     async def qvlcmd(self, m):
-        ".qvl <реплай на видео> <уровень от 1 до 6 (по умолчанию 3)>\nСжакалить видео"
+        " <реплай на видео> <уровень от 1 до 6 (по умолчанию 3)>\n"
 
         reply = await m.get_reply_message()
         if not reply or not reply.file:
