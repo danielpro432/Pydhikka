@@ -1,4 +1,4 @@
-#     t.me/Dany23s This code under AGPL-me 
+#     t.me/Dany23s This code under AGPL-me
 
 import os
 import random
@@ -13,8 +13,10 @@ class VidQualVideo(loader.Module):
     async def qvlcmd(self, m):
         """
         .qvl <реплай на видео> <видеобитрейт> <аудиобитрейт>
-        Пример: .qvl 500k 128k
-        Если не указаны — берётся 500k / 128k
+        Пример:
+        .qvl 500 128     → 500k / 128k
+        .qvl 0.5M 0.128M → 0.5M / 0.128M
+        Если аргументы не указаны — берётся 500k / 128k
         """
 
         reply = await m.get_reply_message()
@@ -28,21 +30,28 @@ class VidQualVideo(loader.Module):
             return await m.respond("Это не видео.")
 
         args = utils.get_args_raw(m).split()
-        vb = args[0] if len(args) > 0 else "500k"   # видеобитрейт по умолчанию
-        ab = args[1] if len(args) > 1 else "128k"   # аудиобитрейт по умолчанию
 
-        # скачиваем видео
+        # значения по умолчанию
+        vb_input = args[0] if len(args) > 0 else "500"
+        ab_input = args[1] if len(args) > 1 else "128"
+
+        # автоматическое добавление k если пользователь не написал M/k
+        vb = vb_input if any(x in vb_input.lower() for x in ["k", "m"]) else f"{vb_input}k"
+        ab = ab_input if any(x in ab_input.lower() for x in ["k", "m"]) else f"{ab_input}k"
+
+        # создаём случайные имена для файлов
         vid = await reply.download_media(
             "".join(random.choice(string.ascii_letters) for _ in range(25)) + ".mp4"
         )
         out = "".join(random.choice(string.ascii_letters) for _ in range(25)) + ".mp4"
 
-        # ffmpeg с пользовательскими значениями
+        # запускаем ffmpeg
         os.system(
             f'ffmpeg -y -i "{vid}" -b:v {vb} -maxrate:v {vb} -b:a {ab} -maxrate:a {ab} "{out}"'
         )
 
-        await reply.reply(file=out)
+        # отправка видео
+        await reply.reply(file=os.path.abspath(out))
 
         # удаляем временные файлы
         os.remove(vid)
