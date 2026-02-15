@@ -47,8 +47,8 @@ class VidQualVideo(loader.Module):
 
         # запускаем ffmpeg
         os.system(
-            f'ffmpeg -y -i "{vid}" -b:v {vb} -maxrate:v {vb} -b:a {ab} -maxrate:a {ab} "{out}"'
-        )
+    f'ffmpeg -hide_banner -loglevel error -y -i "{vid}" -b:v {vb} -maxrate:v {vb} -b:a {ab} -maxrate:a {ab} "{out}"'
+)
 
         # отправка видео
         await reply.reply(file=os.path.abspath(out))
