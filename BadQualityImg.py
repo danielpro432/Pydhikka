@@ -25,31 +25,39 @@ class VidQualImage(loader.Module):
         if not mime.startswith("image"):
             return await m.respond("Ошибка: это не изображение.")
 
-        # Чем больше число — тем хуже, но без крупных блоков
+        # scale и качество (чем выше уровень — тем хуже)
         lvls = {
-            "1": "4",
-            "2": "7",
-            "3": "10",
-            "4": "14",
-            "5": "18",
-            "6": "22",
+            "1": ("0.95", "10"),
+            "2": ("0.90", "15"),
+            "3": ("0.85", "20"),
+            "4": ("0.80", "25"),
+            "5": ("0.75", "30"),
+            "6": ("0.70", "35"),
         }
 
         args = utils.get_args_raw(m)
-        q = lvls.get(args, lvls["3"])
+        scale, q = lvls.get(args, lvls["3"])
 
         try:
             infile = await reply.download_media(
                 "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
             )
 
+            temp = "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
             outfile = "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
 
+            # немного уменьшаем размер + жёстко JPEG-квантизация
             os.system(
                 f'ffmpeg -y -i "{infile}" '
-                f'-q:v {q} '
-                f'-pix_fmt yuv444p '
-                f'-an "{outfile}"'
+                f'-vf "scale=iw*{scale}:ih*{scale}" '
+                f'-q:v {q} -pix_fmt yuv444p "{temp}"'
+            )
+
+            # возвращаем обратно исходный размер, чтобы артефакты были мягко растянуты
+            os.system(
+                f'ffmpeg -y -i "{temp}" '
+                f'-vf "scale=iw/{scale}:ih/{scale}" '
+                f'-q:v {q} -pix_fmt yuv444p "{outfile}"'
             )
 
             if not os.path.exists(outfile):
@@ -61,6 +69,6 @@ class VidQualImage(loader.Module):
             await m.respond("Произошла ошибка.")
 
         finally:
-            for f in ["infile", "outfile"]:
+            for f in ["infile", "temp", "outfile"]:
                 if f in locals() and os.path.exists(locals()[f]):
                     os.remove(locals()[f])
