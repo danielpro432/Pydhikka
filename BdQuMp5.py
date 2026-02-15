@@ -17,7 +17,6 @@ class VidQualVideo(loader.Module):
         if not reply or not reply.file:
             return
 
-        # сразу удаляем сообщение с командой
         await m.delete()
 
         if reply.file.mime_type.split("/")[0] != "video":
@@ -25,7 +24,6 @@ class VidQualVideo(loader.Module):
 
         args = utils.get_args_raw(m)
 
-        # уровни для видео (как раньше)
         lvls_video = {
             "1": "0.1M",
             "2": "0.08M",
@@ -36,7 +34,6 @@ class VidQualVideo(loader.Module):
         }
         lvl_v = lvls_video.get(args, lvls_video["3"])
 
-        # уровни для аудио (чем меньше битрейт — тем хуже звук)
         lvls_audio = {
             "1": "32k",
             "2": "24k",
@@ -47,23 +44,20 @@ class VidQualVideo(loader.Module):
         }
         lvl_a = lvls_audio.get(args, lvls_audio["3"])
 
-        # скачиваем видео
         vid = await reply.download_media(
             "".join(random.choice(string.ascii_letters) for _ in range(25)) + ".mp4"
         )
         out = "".join(random.choice(string.ascii_letters) for _ in range(25)) + ".mp4"
 
-        # ухудшаем видео и звук отдельно
+        # видео и аудио теперь принудительно с кодеками
         os.system(
             f'ffmpeg -y -i "{vid}" '
-            f'-b:v {lvl_v} -maxrate:v {lvl_v} '
-            f'-b:a {lvl_a} -maxrate:a {lvl_a} '
+            f'-c:v libx264 -b:v {lvl_v} -maxrate:v {lvl_v} '
+            f'-c:a aac -b:a {lvl_a} '
             f'"{out}"'
         )
 
-        # отправляем обратно
         await reply.reply(file=out)
 
-        # чистка
         os.remove(vid)
         os.remove(out)
