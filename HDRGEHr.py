@@ -13,7 +13,7 @@ class AudioQual(loader.Module):
     async def qvmcmd(self, m):
         """
         .qvm <битрейт в k>
-        Ломает аудио/видео до непонятного звука
+        Ухудшает аудио/видео в зависимости от битрейта
         """
 
         reply = await m.get_reply_message()
@@ -26,13 +26,14 @@ class AudioQual(loader.Module):
         if not (mime.startswith("video") or mime.startswith("audio")):
             return
 
+        # читаем битрейт от пользователя
         args = utils.get_args_raw(m)
         try:
             br = int(args)
             if br < 1:
                 br = 1
         except:
-            br = 8  # default — сильно ломает
+            br = 64  # default среднее ухудшение
 
         lvl_a = f"{br}k"
 
@@ -42,14 +43,9 @@ class AudioQual(loader.Module):
         )
         outfile = "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".mp3"
 
-        # ffmpeg: ломаем звук сильно
-        # -c:a libmp3lame с низким битрейтом
-        # -ar 8000 частота дискретизации
-        # -ac 1 моно
-        # asetrate и atempo для "ломаного" эффекта
+        # ffmpeg: кодируем как в видео модуле, битрейт реально влияет
         os.system(
-            f'ffmpeg -y -i "{infile}" -vn -c:a libmp3lame -b:a {lvl_a} '
-            f'-ar 8000 -ac 1 -af "asetrate=8000*0.5,atempo=2" "{outfile}"'
+            f'ffmpeg -y -i "{infile}" -vn -c:a libmp3lame -b:a {lvl_a} "{outfile}"'
         )
 
         if os.path.exists(outfile):
