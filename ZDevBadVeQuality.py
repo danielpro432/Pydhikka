@@ -47,7 +47,10 @@ class VidQualVideo(loader.Module):
 
         # запускаем ffmpeg
         os.system(
-            f'ffmpeg -y -i "{vid}" -b:v {vb} -maxrate:v {vb} -b:a {ab} -maxrate:a {ab} "{out}"'
+    f'ffmpeg -y -loglevel error -i "{vid}" '
+    f'-c:v libx264 -preset veryfast -b:v {vb} '
+    f'-c:a aac -b:a {ab} '
+    f'"{out}"'
         )
 
         # отправка видео
