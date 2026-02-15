@@ -16,9 +16,9 @@ class VidQualImage(loader.Module):
         ".qvi <масштаб:0.1-1.0> <качество jpeg:1-50> <реплай на фото/статичный стикер>"  
 
         args = utils.get_args_raw(m).split()
-        await m.delete()  # сразу удаляем команду
+        await m.delete()  # удаляем команду сразу
 
-        # ищем изображение: либо реплай, либо само сообщение
+        # ищем изображение
         reply = await m.get_reply_message()
         if reply and reply.file:
             msg_with_file = reply
@@ -31,7 +31,7 @@ class VidQualImage(loader.Module):
         if not mime.startswith("image"):
             return await m.respond("Ошибка: это не изображение.")
 
-        # устанавливаем масштаб и качество
+        # масштаб и качество
         try:
             scale = float(args[0]) if len(args) > 0 else 0.5
             q = int(args[1]) if len(args) > 1 else 20
@@ -42,20 +42,19 @@ class VidQualImage(loader.Module):
             infile = await msg_with_file.download_media(
                 "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
             )
-
             temp = "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
             outfile = "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
 
-            # Уменьшаем
+            # уменьшение
             os.system(
-                f'ffmpeg -y -i "{infile}" '
+                f'ffmpeg -hide_banner -loglevel error -y -i "{infile}" '
                 f'-vf "scale=iw*{scale}:ih*{scale}" '
                 f'-qscale:v {q} -pix_fmt yuv420p "{temp}"'
             )
 
-            # Возвращаем размер назад
+            # восстановление размера
             os.system(
-                f'ffmpeg -y -i "{temp}" '
+                f'ffmpeg -hide_banner -loglevel error -y -i "{temp}" '
                 f'-vf "scale=iw/{scale}:ih/{scale}" '
                 f'-qscale:v {q} -pix_fmt yuv420p "{outfile}"'
             )
@@ -63,7 +62,7 @@ class VidQualImage(loader.Module):
             if not os.path.exists(outfile):
                 return await m.respond("Ошибка обработки.")
 
-            await msg_with_file.reply(file=outfile)
+            await msg_with_file.reply(file=os.path.abspath(outfile))
 
         except Exception as e:
             await m.respond(f"Произошла ошибка: {e}")
