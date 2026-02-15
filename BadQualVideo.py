@@ -16,8 +16,12 @@ class VidQualVideo(loader.Module):
         ".qvl <реплай на видео> <уровень от 1 до 6 (по умолчанию 3)>\nСжакалить видео"
 
         reply = await m.get_reply_message()
-        if not reply:
+        if not reply or not reply.file:
             return
+
+        # сразу удаляем сообщение с командой
+        await m.delete()
+
         if reply.file.mime_type.split("/")[0] != "video":
             return
 
@@ -42,8 +46,7 @@ class VidQualVideo(loader.Module):
         )
 
         await reply.reply(file=out)
-        await m.delete()  # команда сразу удаляется
 
-        # Чистка
+        # чистка
         os.remove(vid)
         os.remove(out)
