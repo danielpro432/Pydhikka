@@ -12,21 +12,21 @@ class AudioQual(loader.Module):
     @loader.owner
     async def qvmcmd(self, m):
         """
-        .qvm <реплай на видео/аудио> <битрейт в k, например 64>
-        Извлекает аудио и ухудшает его в mp3
+        .qvm <битрейт в k>
+        Ухудшает аудио/видео в mp3
         """
 
         reply = await m.get_reply_message()
         if not reply or not reply.file:
-            return await m.respond("Ошибка: нужен реплай на видео или аудио.")
+            return  # без сообщения
 
         await m.delete()
 
         mime = reply.file.mime_type or ""
         if not (mime.startswith("video") or mime.startswith("audio")):
-            return await m.respond("Ошибка: нужен видео или аудио файл.")
+            return  # без сообщения
 
-        # получаем битрейт от пользователя
+        # пользователь сам вводит битрейт
         args = utils.get_args_raw(m)
         try:
             br = int(args)
@@ -35,7 +35,7 @@ class AudioQual(loader.Module):
             elif br > 128:
                 br = 128
         except:
-            br = 64  # значение по умолчанию
+            br = 16  # default низкий, реально ухудшает
 
         lvl_a = f"{br}k"
 
@@ -44,19 +44,17 @@ class AudioQual(loader.Module):
             "".join(random.choice(string.ascii_letters) for _ in range(20)) + "." +
             ("mp4" if mime.startswith("video") else "mp3")
         )
-
         outfile = "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".mp3"
 
-        # ffmpeg: извлекаем и ухудшаем аудио
+        # ffmpeg: извлекаем аудио и ухудшаем
         os.system(
-            f'ffmpeg -y -i "{infile}" -vn -c:a libmp3lame -b:a {lvl_a} "{outfile}"'
+            f'ffmpeg -y -i "{infile}" -vn -c:a libmp3lame -b:a {lvl_a} -ar 8000 "{outfile}"'
         )
 
-        if not os.path.exists(outfile):
-            return await m.respond("Ошибка обработки аудио.")
-
-        await reply.reply(file=outfile)
+        if os.path.exists(outfile):
+            await reply.reply(file=outfile)
 
         # чистка
         os.remove(infile)
-        os.remove(outfile)
+        if os.path.exists(outfile):
+            os.remove(outfile)
