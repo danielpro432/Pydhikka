@@ -26,28 +26,37 @@ class VidQualImage(loader.Module):
             return await m.respond("Ошибка: это не изображение.")
 
         lvls = {
-            "1": "200k",
-            "2": "150k",
-            "3": "100k",
-            "4": "70k",
-            "5": "40k",
-            "6": "20k",
+            "1": ("15", "0.7"),
+            "2": ("25", "0.6"),
+            "3": ("35", "0.5"),
+            "4": ("45", "0.4"),
+            "5": ("55", "0.3"),
+            "6": ("65", "0.2"),
         }
 
         args = utils.get_args_raw(m)
-        bitrate = lvls.get(args, lvls["3"])
+        quality, scale = lvls.get(args, lvls["3"])
 
         try:
             infile = await reply.download_media(
                 "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
             )
 
+            temp = "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
             outfile = "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
 
+            # Сильно уменьшаем
             os.system(
                 f'ffmpeg -y -i "{infile}" '
-                f'-b:v {bitrate} -maxrate {bitrate} -bufsize {bitrate} '
-                f'-pix_fmt yuv420p "{outfile}"'
+                f'-vf "scale=iw*{scale}:ih*{scale}" '
+                f'-q:v {quality} -pix_fmt yuv420p "{temp}"'
+            )
+
+            # Возвращаем размер назад (чтобы мыло стало крупнее)
+            os.system(
+                f'ffmpeg -y -i "{temp}" '
+                f'-vf "scale=iw/{scale}:ih/{scale}" '
+                f'-q:v {quality} -pix_fmt yuv420p "{outfile}"'
             )
 
             if not os.path.exists(outfile):
@@ -59,6 +68,6 @@ class VidQualImage(loader.Module):
             await m.respond("Произошла ошибка.")
 
         finally:
-            for f in ["infile", "outfile"]:
+            for f in ["infile", "temp", "outfile"]:
                 if f in locals() and os.path.exists(locals()[f]):
                     os.remove(locals()[f])
