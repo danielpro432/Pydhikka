@@ -25,38 +25,30 @@ class VidQualImage(loader.Module):
         if not mime.startswith("image"):
             return await m.respond("Ошибка: это не изображение.")
 
+        # scale, qscale (чем больше qscale — тем хуже качество)
         lvls = {
-            "1": ("15", "0.7"),
-            "2": ("25", "0.6"),
-            "3": ("35", "0.5"),
-            "4": ("45", "0.4"),
-            "5": ("55", "0.3"),
-            "6": ("65", "0.2"),
+            "1": ("0.97", "2"),
+            "2": ("0.94", "3"),
+            "3": ("0.9", "5"),
+            "4": ("0.85", "8"),
+            "5": ("0.8", "12"),
+            "6": ("0.75", "18"),
         }
 
         args = utils.get_args_raw(m)
-        quality, scale = lvls.get(args, lvls["3"])
+        scale, q = lvls.get(args, lvls["3"])
 
         try:
             infile = await reply.download_media(
                 "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
             )
 
-            temp = "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
             outfile = "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
 
-            # Сильно уменьшаем
             os.system(
                 f'ffmpeg -y -i "{infile}" '
                 f'-vf "scale=iw*{scale}:ih*{scale}" '
-                f'-q:v {quality} -pix_fmt yuv420p "{temp}"'
-            )
-
-            # Возвращаем размер назад (чтобы мыло стало крупнее)
-            os.system(
-                f'ffmpeg -y -i "{temp}" '
-                f'-vf "scale=iw/{scale}:ih/{scale}" '
-                f'-q:v {quality} -pix_fmt yuv420p "{outfile}"'
+                f'-qscale:v {q} -pix_fmt yuv420p "{outfile}"'
             )
 
             if not os.path.exists(outfile):
@@ -68,6 +60,6 @@ class VidQualImage(loader.Module):
             await m.respond("Произошла ошибка.")
 
         finally:
-            for f in ["infile", "temp", "outfile"]:
+            for f in ["infile", "outfile"]:
                 if f in locals() and os.path.exists(locals()[f]):
                     os.remove(locals()[f])
