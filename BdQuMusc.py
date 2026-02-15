@@ -12,7 +12,7 @@ class AudioQual(loader.Module):
     @loader.owner
     async def qvmcmd(self, m):
         """
-        .qvm <реплай на видео/аудио> <уровень 1-6>
+        .qvm <реплай на видео/аудио> <битрейт в k, например 64>
         Извлекает аудио и ухудшает его в mp3
         """
 
@@ -26,18 +26,18 @@ class AudioQual(loader.Module):
         if not (mime.startswith("video") or mime.startswith("audio")):
             return await m.respond("Ошибка: нужен видео или аудио файл.")
 
+        # получаем битрейт от пользователя
         args = utils.get_args_raw(m)
+        try:
+            br = int(args)
+            if br < 1:
+                br = 1
+            elif br > 128:
+                br = 128
+        except:
+            br = 64  # значение по умолчанию
 
-        # уровни для аудио (битрейт в kbps, чем меньше — тем хуже)
-        lvls_audio = {
-            "1": "128k",
-            "2": "96k",
-            "3": "64k",
-            "4": "48k",
-            "5": "32k",
-            "6": "16k",
-        }
-        lvl_a = lvls_audio.get(args, lvls_audio["3"])
+        lvl_a = f"{br}k"
 
         # скачиваем файл
         infile = await reply.download_media(
