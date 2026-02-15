@@ -24,13 +24,14 @@ class VidQualAudio(loader.Module):
             return
 
         args = utils.get_args_raw(m)
+        # уровни с реально низким битрейтом для сильного ухудшения
         lvls = {
-            "1": "128k",
-            "2": "96k",
-            "3": "64k",
-            "4": "48k",
-            "5": "32k",
-            "6": "16k",
+            "1": "32k",
+            "2": "24k",
+            "3": "16k",
+            "4": "12k",
+            "5": "8k",
+            "6": "4k",
         }
         lvl = lvls.get(args, lvls["3"])
 
@@ -40,9 +41,8 @@ class VidQualAudio(loader.Module):
         )
         outfile = "".join(random.choice(string.ascii_letters) for _ in range(25)) + ".mp3"
 
-        # ffmpeg: ломаем звук по уровню
+        # ffmpeg: извлекаем и конвертируем аудио
         if mime.startswith("video"):
-            # извлекаем и конвертируем аудио из видео
             os.system(
                 f'ffmpeg -y -i "{infile}" -vn -c:a libmp3lame -b:a {lvl} "{outfile}"'
             )
@@ -57,4 +57,4 @@ class VidQualAudio(loader.Module):
         # чистка
         os.remove(infile)
         if os.path.exists(outfile):
-            os.remove(outfile)
+            os.remove(outfile) 
