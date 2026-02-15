@@ -25,18 +25,18 @@ class VidQualImage(loader.Module):
         if not mime.startswith("image"):
             return await m.respond("Ошибка: это не изображение.")
 
-        # scale, qscale (чем больше qscale — тем хуже качество)
+        # Чем больше число — тем хуже, но без крупных блоков
         lvls = {
-            "1": ("0.97", "2"),
-            "2": ("0.94", "3"),
-            "3": ("0.9", "5"),
-            "4": ("0.85", "8"),
-            "5": ("0.8", "12"),
-            "6": ("0.75", "18"),
+            "1": "4",
+            "2": "7",
+            "3": "10",
+            "4": "14",
+            "5": "18",
+            "6": "22",
         }
 
         args = utils.get_args_raw(m)
-        scale, q = lvls.get(args, lvls["3"])
+        q = lvls.get(args, lvls["3"])
 
         try:
             infile = await reply.download_media(
@@ -47,8 +47,9 @@ class VidQualImage(loader.Module):
 
             os.system(
                 f'ffmpeg -y -i "{infile}" '
-                f'-vf "scale=iw*{scale}:ih*{scale}" '
-                f'-qscale:v {q} -pix_fmt yuv420p "{outfile}"'
+                f'-q:v {q} '
+                f'-pix_fmt yuv444p '
+                f'-an "{outfile}"'
             )
 
             if not os.path.exists(outfile):
