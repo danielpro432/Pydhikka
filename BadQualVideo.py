@@ -1,6 +1,6 @@
 #  Dany23s   
-# хуй
-#член
+# ху
+#чле
 # нет0
 
 import os
@@ -14,7 +14,7 @@ class VideoQual(loader.Module):
 
     @loader.owner
     async def qvlcmd(self, m):
-        ".qvl <реплай на видео> <уровень от 1 до 6 (по умолчанию 3)>\n "
+        " <реплай на видео> <уровень от 1 до 6 (по умолчанию 3)>\n "
 
         reply = await m.get_reply_message()
         if not reply:
