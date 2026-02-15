@@ -13,57 +13,63 @@ class VidQualImage(loader.Module):
 
     @loader.owner
     async def qvicmd(self, m):
-        ".qvi <реплай на фото/статичный стикер> <уровень 1-6>"
+        ".qvi <уровень 1-6> или реплай на фото/статичный стикер"
 
-        reply = await m.get_reply_message()
+        # сразу удаляем команду
         await m.delete()
 
-        if not reply or not reply.file:
-            return await m.respond("Ошибка: нужен реплай на изображение.")
+        args = utils.get_args_raw(m)
+        lvl = args if args in ["1","2","3","4","5","6"] else "3"
 
-        mime = reply.file.mime_type or ""
+        # ищем картинку: либо реплай, либо само сообщение
+        reply = await m.get_reply_message()
+        if reply and reply.file:
+            msg_with_file = reply
+        elif m.file:  # если пользователь прислал фото вместе с командой
+            msg_with_file = m
+        else:
+            return await m.respond("Ошибка: нужно прислать изображение или сделать реплай на него.")
+
+        mime = msg_with_file.file.mime_type or ""
         if not mime.startswith("image"):
             return await m.respond("Ошибка: это не изображение.")
 
-        # scale, jpeg quality (чем больше q — тем хуже)
+        # scale и качество JPEG
         lvls = {
-            "1": ("0.8", "5"),
-            "2": ("0.6", "10"),
-            "3": ("0.5", "20"),
-            "4": ("0.4", "30"),
-            "5": ("0.3", "40"),
-            "6": ("0.2", "50"),
+            "1": ("0.97", "5"),
+            "2": ("0.94", "10"),
+            "3": ("0.91", "15"),
+            "4": ("0.88", "20"),
+            "5": ("0.85", "25"),
+            "6": ("0.82", "30"),
         }
-
-        args = utils.get_args_raw(m)
-        scale, q = lvls.get(args, lvls["3"])
+        scale, q = lvls[lvl]
 
         try:
-            infile = await reply.download_media(
+            infile = await msg_with_file.download_media(
                 "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
             )
-
             temp = "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
             outfile = "".join(random.choice(string.ascii_letters) for _ in range(20)) + ".jpg"
 
-            # Уменьшаем
+            # уменьшаем + сжимаем
             os.system(
                 f'ffmpeg -y -i "{infile}" '
                 f'-vf "scale=iw*{scale}:ih*{scale}" '
-                f'-qscale:v {q} -pix_fmt yuv420p "{temp}"'
+                f'-qscale:v {q} -pix_fmt yuv444p "{temp}"'
             )
 
-            # Возвращаем размер назад
+            # возвращаем размер
             os.system(
                 f'ffmpeg -y -i "{temp}" '
                 f'-vf "scale=iw/{scale}:ih/{scale}" '
-                f'-qscale:v {q} -pix_fmt yuv420p "{outfile}"'
+                f'-qscale:v {q} -pix_fmt yuv444p "{outfile}"'
             )
 
             if not os.path.exists(outfile):
                 return await m.respond("Ошибка обработки.")
 
-            await reply.reply(file=outfile)
+            await msg_with_file.reply(file=outfile)
 
         except Exception:
             await m.respond("Произошла ошибка.")
