@@ -396,14 +396,6 @@ class TempMailModule(loader.Module):
                 removed.append(f"{rec['email']} [{rec['provider']}]")
         self._save_history(uid, history)
         await utils.answer(message, self.strings["del_done"].format("\n".join(removed)))
-@loader.command()
-    async def providers(self, message):
-        """Показать список доступных провайдеров"""
-        names = list(self.providers.keys())
-        text = "📬 <b>Доступные провайдеры:</b>\n" + "\n".join(
-            f"• <code>{n}</code>" for n in names
-        )
-        await utils.answer(message, text)
     @loader.command()
     async def setmaxwindows(self, message):
         """Настроить лимит открытых окон команды: .setmaxwindows mymails 2"""
